@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Атака на бите</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud">
+    <div class="hud-top">
+      <div class="hud-box">КОМБО <span id="combo">0</span></div>
+      <div class="hud-center">
+        <div class="progress-label">АТАКА</div>
+        <div class="progress-wrap">
+          <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        </div>
+      </div>
+      <div class="hud-box">ЩЕЛЧКИ <span id="shots">0</span></div>
+    </div>
+
+    <div class="hud-bottom">
+      <div class="meter-wrap">
+        <div class="meter-label">ТОЧНОСТЬ</div>
+        <div class="meter-bar">
+          <div class="meter-fill" id="acc-fill"></div>
+        </div>
+        <div class="meter-value" id="acc-value">100</div>
+      </div>
+      <div class="controls-hint">
+        <span>Q W E — атака</span>
+        <span>A S D — защита</span>
+      </div>
+      <div class="touch-hint">Тапай по игроку, когда кольцо сойдётся</div>
+    </div>
+
+    <div id="grade-flash" hidden></div>
+    <div id="status" hidden></div>
+    <button id="restart-btn" type="button" hidden>Ещё раз</button>
+
+    <div id="intro">
+      <h1>Атака на бите</h1>
+      <p class="intro-sub">Шесть своих на льду. Шайба живёт только на пасах — держи темп и доводи атаку до щелчка.</p>
+      <ol class="intro-list">
+        <li>Сначала идёт счёт на восемь — просто послушай метроном и постучи по кнопкам, штрафа нет.</li>
+        <li>Стартуем с одного игрока в центре (<b>W</b>), дальше подключаются остальные: <b>Q W E</b> сверху, <b>A S D</b> снизу. На телефоне — тап по игроку.</li>
+        <li>Вокруг игрока сжимается кольцо. Жми ровно когда оно сойдётся с ним.</li>
+        <li>Серия точных пасов копит <b>атаку</b>. Жирная оранжевая нота — <b>щелчок</b>: на полной атаке это гол.</li>
+      </ol>
+      <button id="start-btn" type="button">Поехали</button>
+    </div>
+  </div>
+
+  <a class="back-link" href="../">← К играм</a>
+  <script src="game.js"></script>
+</body>
+</html>

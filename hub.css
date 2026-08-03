@@ -193,6 +193,53 @@ body {
   transform: rotate(-8deg);
 }
 
+.game-card__preview--rhythm {
+  background: linear-gradient(180deg, #dceef9 0%, #b9d9ec 100%);
+}
+
+.preview-rhythm-goal {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  width: 46px;
+  height: 9px;
+  margin-left: -23px;
+  border-left: 3px solid #ff4444;
+  border-right: 3px solid #ff4444;
+  border-top: 3px solid #ff4444;
+}
+
+.preview-rhythm-player {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #2f5f9e, #16304f);
+}
+
+.preview-rhythm-player--q { left: 24%; top: 38%; }
+.preview-rhythm-player--w { left: 50%; top: 30%; }
+.preview-rhythm-player--e { left: 76%; top: 38%; }
+.preview-rhythm-player--a { left: 28%; top: 70%; }
+.preview-rhythm-player--s { left: 50%; top: 82%; }
+.preview-rhythm-player--d { left: 72%; top: 70%; }
+
+.preview-rhythm-player--w {
+  background: linear-gradient(180deg, #ff9a40, #c1450a);
+}
+
+.preview-rhythm-ring {
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  width: 42px;
+  height: 42px;
+  margin: -21px 0 0 -21px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 140, 40, 0.85);
+}
+
 .game-card h2 {
   font-size: 1.25rem;
   margin-bottom: 8px;
