@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Симулятор шайбы</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud">
+    <div class="hud-top">
+      <div class="hud-box" id="lives-box">ЖИЗНИ <span id="lives">♥♥♥</span></div>
+      <div class="hud-center">
+        <div class="progress-label">ДО ВОРОТ</div>
+        <div class="progress-wrap">
+          <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        </div>
+      </div>
+      <div class="hud-box" id="streak-box">СЕРИЯ <span id="streak">0</span></div>
+    </div>
+
+    <div class="hud-bottom">
+      <div class="grip-wrap">
+        <div class="grip-label">ИНЕРЦИЯ</div>
+        <div class="grip-bar">
+          <div class="grip-danger"></div>
+          <div class="grip-fill" id="grip-fill"></div>
+        </div>
+        <div class="grip-value" id="grip-value">55</div>
+      </div>
+      <div class="controls-hint">
+        <span>A СЛЕВА</span>
+        <span>SPACE В ЛОБ</span>
+        <span>D СПРАВА</span>
+      </div>
+      <div id="touch-controls">
+        <button type="button" class="touch-btn" data-input="left" aria-label="Слева">
+          <span class="touch-key">◀</span>
+          <span class="touch-label">СЛЕВА</span>
+        </button>
+        <button type="button" class="touch-btn touch-btn-center" data-input="brace" aria-label="В лоб">
+          <span class="touch-key">●</span>
+          <span class="touch-label">В ЛОБ</span>
+        </button>
+        <button type="button" class="touch-btn" data-input="right" aria-label="Справа">
+          <span class="touch-key">▶</span>
+          <span class="touch-label">СПРАВА</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="brace-flash" hidden></div>
+    <div id="status" hidden></div>
+    <button id="restart-btn" type="button" hidden>Ещё раз</button>
+
+    <div id="intro">
+      <h1>Ты — шайба</h1>
+      <p class="intro-sub">Шайба не рулит. Инерция всегда тает. Единственный способ ехать дальше — вовремя принять удар.</p>
+      <ol class="intro-list">
+        <li>Клюшка слева — <b>A</b>, справа — <b>D</b>, в лоб — <b>SPACE</b>. Попал — удар даёт скорость.</li>
+        <li><b>Жизни</b> — сколько раз можно не долететь до ворот. Недолёт снимает сердце.</li>
+        <li><b>Серия</b> — сколько голов забил на текущих трёх жизнях. Три недолёта — серия сбрасывается.</li>
+        <li>Доедь до ворот в конце тоннеля.</li>
+      </ol>
+      <button id="start-btn" type="button">Поехали</button>
+    </div>
+  </div>
+
+  <a class="back-link" href="../">← К играм</a>
+  <script src="game.js"></script>
+</body>
+</html>

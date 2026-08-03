@@ -7,30 +7,31 @@
 | Игра | Путь |
 |------|------|
 | Удар с вертушки | [`/spinner/`](spinner/) |
+| Симулятор шайбы | [`/puck/`](puck/) |
 
 ## Локально
 
 ```bash
-python3 -m http.server 8080
+python3 -m http.server 8765
 ```
 
-- Разводящая: [http://localhost:8080](http://localhost:8080)
-- Хоккей: [http://localhost:8080/spinner/](http://localhost:8080/spinner/)
+- Разводящая: [http://localhost:8765](http://localhost:8765)
+- Вертушка: [http://localhost:8765/spinner/](http://localhost:8765/spinner/)
+- Симулятор шайбы: [http://localhost:8765/puck/](http://localhost:8765/puck/)
 
 ## GitHub Pages
 
 Settings → Pages → branch `main` / root:
 
 - [https://guygud.github.io/hockey/](https://guygud.github.io/hockey/) — разводящая
-- [https://guygud.github.io/hockey/spinner/](https://guygud.github.io/hockey/spinner/) — хоккей
+- [https://guygud.github.io/hockey/spinner/](https://guygud.github.io/hockey/spinner/) — вертушка
+- [https://guygud.github.io/hockey/puck/](https://guygud.github.io/hockey/puck/) — симулятор шайбы
 
 ## Структура
 
 ```
 index.html      — разводящая страница
 hub.css         — стили разводящей
-spinner/        — игра «Удар с вертушки»
-  index.html
-  game.js
-  style.css
+spinner/        — «Удар с вертушки»
+puck/           — «Симулятор шайбы»
 ```

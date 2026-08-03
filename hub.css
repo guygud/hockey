@@ -149,6 +149,50 @@ body {
   background: #c41e3a;
 }
 
+.game-card__preview--fpv {
+  background: linear-gradient(180deg, #1a3350 0 38%, #b7d8ea 38% 100%);
+}
+
+.preview-fpv-horizon {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 38%;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.preview-fpv-goalie {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  width: 18px;
+  height: 28px;
+  margin-left: -9px;
+  background: #f2f2f2;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+.preview-fpv-skate {
+  position: absolute;
+  bottom: 10px;
+  width: 34px;
+  height: 48px;
+  background: #151820;
+  border-radius: 4px 4px 2px 2px;
+}
+
+.preview-fpv-skate--l {
+  left: 8px;
+  transform: rotate(8deg);
+}
+
+.preview-fpv-skate--r {
+  right: 8px;
+  transform: rotate(-8deg);
+}
+
 .game-card h2 {
   font-size: 1.25rem;
   margin-bottom: 8px;
