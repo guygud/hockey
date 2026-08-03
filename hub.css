@@ -240,6 +240,65 @@ body {
   border: 3px solid rgba(255, 140, 40, 0.85);
 }
 
+.game-card__preview--pass {
+  background: linear-gradient(180deg, #dceef9 0%, #b9d9ec 100%);
+}
+
+.preview-pass-goal {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  width: 46px;
+  height: 9px;
+  margin-left: -23px;
+  border-left: 3px solid #ff4444;
+  border-right: 3px solid #ff4444;
+  border-top: 3px solid #ff4444;
+}
+
+.preview-pass-player {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #2f5f9e, #16304f);
+}
+
+.preview-pass-player--0 { left: 50%; top: 88%; }
+.preview-pass-player--1 { left: 24%; top: 72%; }
+.preview-pass-player--2 { left: 76%; top: 58%; }
+.preview-pass-player--3 { left: 32%; top: 44%; }
+.preview-pass-player--4 { left: 68%; top: 32%; }
+.preview-pass-player--5 {
+  left: 50%;
+  top: 20%;
+  background: linear-gradient(180deg, #ff9a40, #c1450a);
+}
+
+.preview-pass-ring {
+  position: absolute;
+  left: 50%;
+  top: 88%;
+  width: 36px;
+  height: 36px;
+  margin: -18px 0 0 -18px;
+  border-radius: 50%;
+  border: 3px solid rgba(100, 210, 255, 0.85);
+}
+
+.preview-pass-puck {
+  position: absolute;
+  left: 50%;
+  top: 92%;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: #1a1a22;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
 .game-card h2 {
   font-size: 1.25rem;
   margin-bottom: 8px;

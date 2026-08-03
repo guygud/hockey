@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Распасовка</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud">
+    <div class="hud-top">
+      <div class="hud-box" id="lives-box">ЖИЗНИ <span id="lives">♥♥♥</span></div>
+      <div class="hud-center">
+        <div class="progress-label">АТАКА</div>
+        <div class="progress-wrap">
+          <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        </div>
+      </div>
+      <div class="hud-box">ГОЛЫ <span id="goals">0</span></div>
+    </div>
+
+    <div class="hud-bottom">
+      <div class="meter-wrap">
+        <div class="meter-label">СЕРИЯ</div>
+        <div class="meter-bar">
+          <div class="meter-fill" id="streak-fill"></div>
+        </div>
+        <div class="meter-value" id="streak">0</div>
+      </div>
+      <div class="controls-hint">
+        <span>ПРОБЕЛ — пас в такт</span>
+        <span>Чем выше — тем быстрее</span>
+      </div>
+      <div class="touch-hint">Тапай в такт, когда кольцо сойдётся</div>
+    </div>
+
+    <div id="grade-flash" hidden></div>
+    <div id="status" hidden></div>
+    <button id="restart-btn" type="button" hidden>Ещё раз</button>
+
+    <div id="intro">
+      <h1>Распасовка</h1>
+      <p class="intro-sub">Одна кнопка. Шайба поднимается по своим к нападающему — точный пас ведёт вперёд, промах откатывает назад.</p>
+      <ol class="intro-list">
+        <li>Жми <b>пробел</b> (на телефоне — тап), когда кольцо сойдётся с игроком.</li>
+        <li>Попал — пас на следующего ближе к воротам. Промах — откат назад.</li>
+        <li>Чем выше забрался, тем быстрее темп и уже окно.</li>
+        <li>У нападающего три бита на <b>замах</b>, потом щелчок. Три жизни — промах на первом звене это обрез.</li>
+      </ol>
+      <button id="start-btn" type="button">Поехали</button>
+    </div>
+  </div>
+
+  <a class="back-link" href="../">← К играм</a>
+  <script src="game.js"></script>
+</body>
+</html>
