@@ -38,6 +38,19 @@ body {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 }
 
+#scoreboard {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+
+#scoreboard strong {
+  font-weight: 700;
+}
+
 #hint {
   font-size: 14px;
   opacity: 0.9;

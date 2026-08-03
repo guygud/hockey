@@ -8,9 +8,14 @@
 </head>
 <body>
   <div id="hud">
-    <p id="hint">Крути и отпусти — обойди защитников</p>
+    <div id="scoreboard">
+      <span>Голы: <strong id="score">0</strong></span>
+      <span>Промахи: <strong id="misses">0</strong>/5</span>
+      <span>Скорость: <strong id="speed-level">1</strong></span>
+    </div>
+    <p id="hint">Оттяни клюшку, целься стрелкой, отпусти</p>
     <p id="status"></p>
-    <button id="reset-btn" type="button" hidden>Снова</button>
+    <button id="reset-btn" type="button" hidden>Заново</button>
   </div>
   <canvas id="game"></canvas>
   <script src="game.js"></script>
