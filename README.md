@@ -1,11 +1,12 @@
-# Удар с вертушки
+# Прототипы игр
 
-Простой прототип: хоккеист на вертушке, шайба и два защитников перед воротами. Цель — обойти защитников и забить.
+Коллекция простых web-игр на примитивах. Деплой на GitHub Pages без сборки.
 
-## Управление
+## Игры
 
-- **Мышь / тач:** зажми, оттяни вертушку в сторону, отпусти — удар по шайбе.
-- Кнопка **«Снова»** — новый раунд.
+| Игра | Путь |
+|------|------|
+| Удар с вертушки | [`/spinner/`](spinner/) |
 
 ## Локально
 
@@ -13,12 +14,23 @@
 python3 -m http.server 8080
 ```
 
-Открой [http://localhost:8080](http://localhost:8080).
+- Разводящая: [http://localhost:8080](http://localhost:8080)
+- Хоккей: [http://localhost:8080/spinner/](http://localhost:8080/spinner/)
 
 ## GitHub Pages
 
-После пуша в `main`:
+Settings → Pages → branch `main` / root:
 
-1. Репозиторий → **Settings** → **Pages**
-2. **Deploy from branch** → `main` / `/ (root)`
-3. Игра: [https://guygud.github.io/hockey/](https://guygud.github.io/hockey/)
+- [https://guygud.github.io/hockey/](https://guygud.github.io/hockey/) — разводящая
+- [https://guygud.github.io/hockey/spinner/](https://guygud.github.io/hockey/spinner/) — хоккей
+
+## Структура
+
+```
+index.html      — разводящая страница
+hub.css         — стили разводящей
+spinner/        — игра «Удар с вертушки»
+  index.html
+  game.js
+  style.css
+```

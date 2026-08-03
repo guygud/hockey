@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Удар с вертушки</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="hud">
+    <div id="scoreboard">
+      <span>Голы: <strong id="score">0</strong></span>
+      <span>Промахи: <strong id="misses">0</strong>/5</span>
+      <span>Скорость: <strong id="speed-level">1</strong></span>
+    </div>
+    <p id="hint">Оттяни клюшку, целься стрелкой, отпусти</p>
+    <p id="status"></p>
+    <button id="reset-btn" type="button" hidden>Заново</button>
+  </div>
+  <canvas id="game"></canvas>
+  <script src="game.js"></script>
+</body>
+</html>

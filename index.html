@@ -2,22 +2,41 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Удар с вертушки</title>
-  <link rel="stylesheet" href="style.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Прототипы игр</title>
+  <link rel="stylesheet" href="hub.css">
 </head>
 <body>
-  <div id="hud">
-    <div id="scoreboard">
-      <span>Голы: <strong id="score">0</strong></span>
-      <span>Промахи: <strong id="misses">0</strong>/5</span>
-      <span>Скорость: <strong id="speed-level">1</strong></span>
-    </div>
-    <p id="hint">Оттяни клюшку, целься стрелкой, отпусти</p>
-    <p id="status"></p>
-    <button id="reset-btn" type="button" hidden>Заново</button>
-  </div>
-  <canvas id="game"></canvas>
-  <script src="game.js"></script>
+  <main class="hub">
+    <header class="hub__header">
+      <p class="hub__eyebrow">GitHub Pages</p>
+      <h1>Прототипы игр</h1>
+      <p class="hub__lead">Коллекция простых игр на примитивах. Выбирай прототип и тестируй.</p>
+    </header>
+
+    <section class="hub__grid" aria-label="Список игр">
+      <a class="game-card game-card--ready" href="spinner/">
+        <span class="game-card__badge">Играть</span>
+        <div class="game-card__preview" aria-hidden="true">
+          <span class="preview-puck"></span>
+          <span class="preview-stick"></span>
+          <span class="preview-goal"></span>
+        </div>
+        <h2>Удар с вертушки</h2>
+        <p>Хоккейный кикер: оттяни клюшку, поймай стрелку, обойди защитников и забей.</p>
+      </a>
+
+      <article class="game-card game-card--soon">
+        <span class="game-card__badge">Скоро</span>
+        <div class="game-card__preview game-card__preview--empty" aria-hidden="true"></div>
+        <h2>Следующий прототип</h2>
+        <p>Здесь появится новая игра из этой же серии.</p>
+      </article>
+    </section>
+
+    <footer class="hub__footer">
+      <a href="https://github.com/guygud/hockey">GitHub</a>
+    </footer>
+  </main>
 </body>
 </html>
