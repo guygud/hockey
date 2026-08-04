@@ -8,6 +8,8 @@ html,
 body {
   width: 100%;
   height: 100%;
+  /* Safari's toolbar collapses mid-scroll; dvh keeps the layout from jumping. */
+  height: 100dvh;
   overflow: hidden;
   background: #02060c;
   font-family: "Segoe UI", system-ui, sans-serif;
@@ -445,24 +447,63 @@ body {
   display: none;
 }
 
+/* Opaque so the HUD never shows through, and scrollable when the rules do not
+   fit a phone screen. margin:auto on the panel centres it and still scrolls. */
 #intro {
   pointer-events: auto;
   position: absolute;
   inset: 0;
   display: flex;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+  background: #02060c;
+}
+
+.intro-panel {
+  margin: auto;
+  display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: 14px;
-  padding: 24px;
-  background: rgba(2, 6, 12, 0.9);
   text-align: center;
+}
+
+/* Nothing behind the rules should compete with them for the screen. */
+body.intro-open .hud-top,
+body.intro-open .hud-bottom {
+  display: none;
 }
 
 #intro h1 {
   font-size: clamp(1.8rem, 6vw, 2.6rem);
   font-weight: 800;
   letter-spacing: 0.04em;
+}
+
+/* Phones in landscape or with a tall browser chrome: shrink instead of scroll. */
+@media (max-height: 760px) {
+  #intro h1 {
+    font-size: clamp(1.4rem, 5vw, 1.9rem);
+  }
+
+  .intro-panel {
+    gap: 10px;
+  }
+
+  .intro-sub {
+    font-size: 14px;
+  }
+
+  .intro-list {
+    font-size: 13px;
+    gap: 6px;
+  }
+
+  #start-btn {
+    padding: 11px 28px;
+  }
 }
 
 .intro-sub {

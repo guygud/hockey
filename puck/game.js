@@ -337,16 +337,22 @@
     updateHud();
   }
 
+  // The intro owns the whole screen: the HUD hides so it cannot show through.
+  function showIntro(visible) {
+    introEl.hidden = !visible;
+    document.body.classList.toggle("intro-open", visible);
+  }
+
   function resetGame() {
     resetRun({ keepLives: false, keepStreak: false, keepGoals: false });
     phase = "ready";
-    introEl.hidden = false;
+    showIntro(true);
     tutorAgainBtn.hidden = !tutorSeen();
   }
 
   function startRun(withTutor) {
     ensureAudio();
-    introEl.hidden = true;
+    showIntro(false);
     tutorOn = withTutor === undefined ? !tutorSeen() : !!withTutor;
     tutorStep = 0;
     resetRun({ keepLives: false, keepStreak: false, keepGoals: false });
@@ -1437,7 +1443,7 @@
       runContinue();
       return;
     }
-    introEl.hidden = true;
+    showIntro(false);
     resetRun({ keepLives: false, keepStreak: false, keepGoals: false });
   });
 

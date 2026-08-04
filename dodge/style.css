@@ -8,6 +8,8 @@ html,
 body {
   width: 100%;
   height: 100%;
+  /* Safari's toolbar collapses mid-scroll; dvh keeps the layout from jumping. */
+  height: 100dvh;
   overflow: hidden;
   background: #02060c;
   font-family: "Segoe UI", system-ui, sans-serif;
@@ -222,11 +224,14 @@ body {
   box-shadow: 0 0 8px rgba(255, 60, 90, 0.7);
 }
 
-.ink-team {
+/* Scoped copies win over the generic orange `b` inside the intro list. */
+.ink-team,
+.intro-list b.ink-team {
   color: #7fd4ff;
 }
 
-.ink-foe {
+.ink-foe,
+.intro-list b.ink-foe {
   color: #ff8496;
 }
 
@@ -302,6 +307,10 @@ body {
   /* Back link sits top-left here — clear the HUD row out from under it. */
   .hud-top {
     padding-top: 48px;
+  }
+
+  #tutor-hide {
+    top: 116px;
   }
 }
 
@@ -403,72 +412,27 @@ body {
   cursor: pointer;
 }
 
+#report-alt {
+  position: absolute;
+  left: 50%;
+  top: 72%;
+  transform: translate(-50%, -50%);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 #restart-btn:hover {
   background: #fff;
 }
 
-/* Tutorial card sits in the upper letterbox so the incoming stick stays visible. */
-#tutor {
-  pointer-events: auto;
+/* Hints run in the canvas now; this only lets the player switch them off. */
+#tutor-hide {
   position: absolute;
   left: 50%;
-  top: 9%;
+  top: 76px;
   transform: translateX(-50%);
-  width: min(540px, calc(100% - 32px));
-  padding: 16px 20px 14px;
-  border-radius: 14px;
-  background: rgba(6, 14, 28, 0.95);
-  border: 1px solid rgba(120, 200, 255, 0.4);
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
-  text-align: left;
-}
-
-#tutor[hidden] {
-  display: none;
-}
-
-.tutor-step {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  color: rgba(120, 200, 255, 0.85);
-}
-
-.tutor-text {
-  margin-top: 8px;
-  font-size: 15px;
-  line-height: 1.45;
-  color: rgba(232, 244, 255, 0.9);
-}
-
-.tutor-text b {
-  color: #fff;
-  background: rgba(120, 200, 255, 0.18);
-  padding: 1px 6px;
-  border-radius: 5px;
-}
-
-.tutor-actions {
-  margin-top: 14px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-
-#tutor-next {
-  padding: 9px 20px;
-  border: none;
-  border-radius: 8px;
-  background: #e8f4ff;
-  color: #0a1628;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-#tutor-next:hover {
-  background: #fff;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .ghost-btn {
@@ -496,24 +460,67 @@ body {
   display: none;
 }
 
+/* Opaque so the HUD never shows through, and scrollable when the rules do not
+   fit a phone screen. margin:auto on the panel centres it and still scrolls. */
 #intro {
   pointer-events: auto;
   position: absolute;
   inset: 0;
   display: flex;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+  background: #02060c;
+}
+
+.intro-panel {
+  margin: auto;
+  display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: 14px;
-  padding: 24px;
-  background: rgba(2, 6, 12, 0.9);
   text-align: center;
+}
+
+/* Nothing behind the rules should compete with them for the screen. */
+body.intro-open .hud-top,
+body.intro-open .hud-bottom {
+  display: none;
 }
 
 #intro h1 {
   font-size: clamp(1.8rem, 6vw, 2.6rem);
   font-weight: 800;
   letter-spacing: 0.04em;
+}
+
+/* Phones in landscape or with a tall browser chrome: shrink instead of scroll. */
+@media (max-height: 760px) {
+  #intro h1 {
+    font-size: clamp(1.4rem, 5vw, 1.9rem);
+  }
+
+  .intro-panel {
+    gap: 10px;
+  }
+
+  .intro-sub {
+    font-size: 14px;
+  }
+
+  .intro-list {
+    font-size: 13px;
+    gap: 6px;
+  }
+
+  .intro-note {
+    font-size: 12px;
+  }
+
+  #start-btn {
+    padding: 11px 28px;
+  }
 }
 
 .intro-sub {
@@ -535,6 +542,13 @@ body {
 
 .intro-list b {
   color: #ffb380;
+}
+
+.intro-note {
+  max-width: 460px;
+  font-size: 13px;
+  line-height: 1.45;
+  opacity: 0.7;
 }
 
 #start-btn {
@@ -585,8 +599,6 @@ body {
 }
 
 @media (max-width: 640px) {
-  #tutor { top: 7%; padding: 13px 15px 12px; }
-  .tutor-text { font-size: 13.5px; }
   .hud-box { font-size: 12px; min-width: 90px; padding: 6px 10px; }
   .controls-hint { gap: 14px; font-size: 11px; }
   .stick-legend { gap: 12px; font-size: 10px; }

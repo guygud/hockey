@@ -11,13 +11,10 @@
   const braceFlash = document.getElementById("brace-flash");
   const statusEl = document.getElementById("status");
   const restartBtn = document.getElementById("restart-btn");
+  const reportAltBtn = document.getElementById("report-alt");
   const introEl = document.getElementById("intro");
   const startBtn = document.getElementById("start-btn");
-  const tutorEl = document.getElementById("tutor");
-  const tutorStepEl = document.getElementById("tutor-step");
-  const tutorTextEl = document.getElementById("tutor-text");
-  const tutorNextBtn = document.getElementById("tutor-next");
-  const tutorSkipBtn = document.getElementById("tutor-skip");
+  const tutorHideBtn = document.getElementById("tutor-hide");
   const tutorAgainBtn = document.getElementById("tutor-again");
 
   const CORRIDOR = { halfW: 200, ribStep: 60 };
@@ -60,6 +57,13 @@
   const DRAIN_RAMP = 0.55;
   const GAP_RAMP = 0.3;
   const WINDOW_RAMP = 0.22;
+  // Hints coach this many sticks, and light up this long before contact.
+  const TUTOR_LESSONS = 5;
+  const TUTOR_CUE_LEAD = 1.9;
+  const TUTOR_WIN_MUL = 1.9;
+  // School pace: slow enough to read a colour, and it fits every lesson on the
+  // track. Speed snaps back to the bar the moment the lesson is over.
+  const TUTOR_SPEED = 300;
   const GRADE_FLASH_TIME = 0.55;
   const TREMBLE_DECAY = 1.7;
   // How far past the hit line a resolved stick keeps sliding by.
@@ -110,9 +114,10 @@
   let pendingContinue = null;
   let confirmAt = 0;
   let tutorOn = false;
-  let tutorPaused = false;
-  let tutorStep = 0;
   let tutorSpawns = 0;
+  let tutorTaught = 0;
+  let tutorOk = 0;
+  let pendingAlt = null;
 
   // ---------- AUDIO ----------
 
@@ -205,11 +210,7 @@
   }
 
   function createPuck() {
-    return {
-      x: 0,
-      z: 40,
-      vz: SPEED_MIN + MOM_START * (SPEED_MAX - SPEED_MIN),
-    };
+    return { x: 0, z: 40, vz: speedFor(MOM_START) };
   }
 
   function pickSide() {
@@ -226,19 +227,31 @@
     return Math.random() < FOE_SHARE + FOE_RAMP * levelMix();
   }
 
-  // While teaching, force team stick, then foe stick, then frontal foe.
+  // While teaching, walk through the three answers in order, then repeat the two
+  // side cases so the colour rule gets a second pass.
+  // The three answers, then the two colour cases again. Nothing here costs
+  // inertia: the price of fumbling a lesson is repeating the lesson.
+  const TUTOR_ORDER = [
+    { side: null, foe: false },
+    { side: null, foe: true },
+    { side: 0, foe: true },
+    { side: null, foe: true },
+    { side: null, foe: false },
+  ];
+
   function nextSpawn() {
     if (!tutorOn) {
       const side = pickSide();
       return { side, foe: pickFoe(side) };
     }
+    const step = TUTOR_ORDER[tutorSpawns];
     tutorSpawns += 1;
-    const anySide = () => (Math.random() < 0.5 ? -1 : 1);
-    if (tutorSpawns === 1) return { side: anySide(), foe: false };
-    if (tutorSpawns === 2) return { side: anySide(), foe: true };
-    if (tutorSpawns === 3) return { side: 0, foe: true };
-    const side = pickSide();
-    return { side, foe: pickFoe(side) };
+    if (!step) {
+      const side = pickSide();
+      return { side, foe: pickFoe(side) };
+    }
+    const side = step.side === null ? (Math.random() < 0.5 ? -1 : 1) : step.side;
+    return { side, foe: step.foe, lesson: true, free: true };
   }
 
   // What the player must press: take a team pass on its own side, swerve away
@@ -249,7 +262,7 @@
     return away < 0 ? "left" : "right";
   }
 
-  function makeObstacle(z, side, foe) {
+  function makeObstacle(z, side, foe, opts = {}) {
     return {
       z,
       side,
@@ -258,7 +271,9 @@
       type: side === 0 ? "cross" : "stick",
       resolved: false,
       ok: false,
-      free: false,
+      // lesson: shows the hint zone. free: a fumble here costs no inertia.
+      lesson: !!opts.lesson,
+      free: !!opts.free,
       flip: Math.random() < 0.5 ? -1 : 1,
       answer: null,
       windowOpen: false,
@@ -282,7 +297,14 @@
     return GOOD * (1 - WINDOW_RAMP * levelMix());
   }
 
+  // A coached stick is forgiving: the same rules, just a wider moment to hit.
+  function winMul(obs) {
+    return obs && obs.lesson ? TUTOR_WIN_MUL : 1;
+  }
+
   function spawnInterval() {
+    // Lessons arrive with room to read the colour before choosing a side.
+    if (tutorOn && tutorSpawns < TUTOR_LESSONS) return tutorSpawns === 0 ? 2.6 : 2.1;
     const t = Math.max(0, Math.min(1, puck.z / runDist));
     const base = INTERVAL_START + (INTERVAL_END - INTERVAL_START) * t;
     return base * (1 - GAP_RAMP * levelMix());
@@ -294,12 +316,13 @@
     if (finalSpawned) return;
 
     const finalZ = runDist - 200;
-    // The very first stick of a tutorial run comes late, so there is time to roll.
-    const gap = tutorOn && tutorSpawns === 0 ? 2.4 : spawnInterval();
-    const lead = Math.max(puck.vz, SPEED_MIN) * gap;
+    const lead = Math.max(puck.vz, SPEED_MIN) * spawnInterval();
     const nextZ = Math.max(lastSpawnZ + 80, puck.z + lead);
+    // Keep the corridor before the net clear, or the last stick lands in your
+    // face with no time to answer it.
+    const minApproach = Math.max(400, Math.max(puck.vz, SPEED_MIN) * 1.3);
 
-    if (nextZ >= finalZ - 40 || puck.z + lead >= finalZ) {
+    if (nextZ >= finalZ - minApproach) {
       obstacles.push(makeObstacle(finalZ, 0, true));
       lastSpawnZ = finalZ;
       finalSpawned = true;
@@ -307,7 +330,9 @@
     }
 
     const spawn = nextSpawn();
-    obstacles.push(makeObstacle(nextZ, spawn.side, spawn.foe));
+    obstacles.push(
+      makeObstacle(nextZ, spawn.side, spawn.foe, { lesson: spawn.lesson, free: spawn.free })
+    );
     lastSpawnZ = nextZ;
   }
 
@@ -352,6 +377,8 @@
     boostFx = 0;
     runStats = { perfect: 0, good: 0, wrong: 0, missed: 0, passes: 0, dodges: 0 };
     tutorSpawns = 0;
+    tutorTaught = 0;
+    tutorOk = 0;
     lastSpawnZ = 280;
     finalSpawned = false;
     gradeFlashTimer = 0;
@@ -362,29 +389,37 @@
     phase = "play";
     if (!opts.keepGoals) goals = 0;
     pendingContinue = null;
-    tutorPaused = false;
-    tutorEl.hidden = true;
+    pendingAlt = null;
+    tutorHideBtn.hidden = !tutorOn;
     statusEl.hidden = true;
     statusEl.className = "";
     restartBtn.hidden = true;
+    reportAltBtn.hidden = true;
     braceFlash.hidden = true;
     braceFlash.className = "";
     maybeSpawnObstacles();
     updateHud();
   }
 
+  // The intro owns the whole screen: the HUD hides so it cannot show through.
+  function showIntro(visible) {
+    introEl.hidden = !visible;
+    document.body.classList.toggle("intro-open", visible);
+  }
+
   function resetGame() {
+    // Back to the intro: hints stay unfinished, so the next run coaches again.
+    tutorOn = false;
     resetRun({ keepLives: false, keepStreak: false, keepGoals: false });
     phase = "ready";
-    introEl.hidden = false;
+    showIntro(true);
     tutorAgainBtn.hidden = !tutorSeen();
   }
 
   function startRun(withTutor) {
     ensureAudio();
-    introEl.hidden = true;
+    showIntro(false);
     tutorOn = withTutor === undefined ? !tutorSeen() : !!withTutor;
-    tutorStep = 0;
     resetRun({ keepLives: false, keepStreak: false, keepGoals: false });
     phase = "play";
   }
@@ -479,9 +514,14 @@
     }
   }
 
+  function speedFor(m) {
+    const v = SPEED_MIN + m * (SPEED_MAX - SPEED_MIN);
+    return tutorOn ? Math.min(v, TUTOR_SPEED) : v;
+  }
+
   function applyMom(delta) {
     mom = Math.max(0, Math.min(1, mom + delta));
-    puck.vz = SPEED_MIN + mom * (SPEED_MAX - SPEED_MIN);
+    puck.vz = speedFor(mom);
   }
 
   function resolveSuccess(obs, grade) {
@@ -530,6 +570,7 @@
 
     if (dodged) sfxDodge(perfect);
     else sfxHit(perfect);
+    if (obs.lesson) tutorTaughtOne(true);
     updateHud();
   }
 
@@ -557,6 +598,7 @@
     braceLean = obs.side * -12;
     spawnSparks(6);
     sfxFail();
+    if (obs.lesson) tutorTaughtOne(false);
     updateHud();
   }
 
@@ -605,9 +647,10 @@
     const pressed = framePresses[0];
     const t = timeToHit(obs);
     const absT = Math.abs(t);
+    const mul = winMul(obs);
 
     // Too early with the right move: don't punish it, wait for the window.
-    if (pressed === obs.want && t > goodWin()) {
+    if (pressed === obs.want && t > goodWin() * mul) {
       showGrade("РАНО", "grade-whiff");
       return;
     }
@@ -619,9 +662,9 @@
     }
 
     obs.answer = pressed;
-    if (absT <= perfectWin()) {
+    if (absT <= perfectWin() * mul) {
       resolveSuccess(obs, "perfect");
-    } else if (absT <= goodWin()) {
+    } else if (absT <= goodWin() * mul) {
       resolveSuccess(obs, "good");
     } else {
       // Past the hit window with the right side — counts as a miss.
@@ -634,7 +677,7 @@
       if (obs.resolved) continue;
       const t = timeToHit(obs);
 
-      const late = -goodWin();
+      const late = -goodWin() * winMul(obs);
       if (t < WINDOW_OPEN && t > late) {
         obs.windowOpen = true;
       }
@@ -746,21 +789,25 @@
   }
 
   // Round always ends on a report the player dismisses — never auto-restarts.
-  function showReport(title, cls, btnLabel, action, note) {
+  function showReport(opts) {
+    const rows = opts.rows || reportRows();
     braceFlash.hidden = true;
     statusEl.hidden = false;
-    statusEl.className = cls;
+    statusEl.className = opts.cls;
     statusEl.innerHTML =
-      `<div class="report-title">${title}</div>` +
+      `<div class="report-title">${opts.title}</div>` +
       `<div class="report-rows">` +
-      reportRows()
+      rows
         .map(([k, v]) => `<div class="report-row"><span>${k}</span><b>${v}</b></div>`)
         .join("") +
       `</div>` +
-      (note ? `<div class="report-note">${note}</div>` : "");
+      (opts.note ? `<div class="report-note">${opts.note}</div>` : "");
     restartBtn.hidden = false;
-    restartBtn.textContent = btnLabel;
-    pendingContinue = action;
+    restartBtn.textContent = opts.btnLabel;
+    pendingContinue = opts.action;
+    pendingAlt = opts.altAction || null;
+    reportAltBtn.hidden = !opts.altLabel;
+    if (opts.altLabel) reportAltBtn.textContent = opts.altLabel;
     confirmAt = performance.now() + CONFIRM_DELAY;
   }
 
@@ -769,25 +816,34 @@
     if (performance.now() < confirmAt) return;
     const next = pendingContinue;
     pendingContinue = null;
+    pendingAlt = null;
+    next();
+  }
+
+  function runAlternative() {
+    if (!pendingAlt) return;
+    if (performance.now() < confirmAt) return;
+    const next = pendingAlt;
+    pendingContinue = null;
+    pendingAlt = null;
     next();
   }
 
   function onScored() {
+    if (phase !== "play") return;
     phase = "scored";
     streak += 1;
     goals += 1;
     sfxGoal();
     updateHud();
-    showReport(
-      `ГОЛ! Серия ${streak}`,
-      "report-good",
-      "Следующая атака →",
-      () => {
-        // Same life bank: keep hearts and the goal streak.
-        resetRun({ keepLives: true, keepStreak: true, keepGoals: true });
-      },
-      nextAttemptNote()
-    );
+    showReport({
+      title: `ГОЛ! Серия ${streak}`,
+      cls: "report-good",
+      btnLabel: "Следующая атака →",
+      // Same life bank: keep hearts and the goal streak.
+      action: () => resetRun({ keepLives: true, keepStreak: true, keepGoals: true }),
+      note: nextAttemptNote(),
+    });
   }
 
   function onStalled() {
@@ -802,25 +858,25 @@
       const finalGoals = goals;
       streak = 0;
       updateHud();
-      showReport(
-        `ЖИЗНИ КОНЧИЛИСЬ · голов ${finalGoals}`,
-        "report-bad",
-        "Начать заново",
-        () => resetRun({ keepLives: false, keepStreak: false, keepGoals: false }),
-        "Сложность сбросится на первую попытку."
-      );
+      showReport({
+        title: `ЖИЗНИ КОНЧИЛИСЬ · голов ${finalGoals}`,
+        cls: "report-bad",
+        btnLabel: "Начать заново",
+        action: () => resetRun({ keepLives: false, keepStreak: false, keepGoals: false }),
+        note: "Сложность сбросится на первую попытку.",
+      });
       return;
     }
 
     phase = "missed";
     updateHud();
-    showReport(
-      "ИНЕРЦИЯ КОНЧИЛАСЬ",
-      "report-bad",
-      "Ещё попытка →",
-      () => resetRun({ keepLives: true, keepStreak: true, keepGoals: true }),
-      nextAttemptNote()
-    );
+    showReport({
+      title: "ИНЕРЦИЯ КОНЧИЛАСЬ",
+      cls: "report-bad",
+      btnLabel: "Ещё попытка →",
+      action: () => resetRun({ keepLives: true, keepStreak: true, keepGoals: true }),
+      note: nextAttemptNote(),
+    });
   }
 
   // ---------- TUTORIAL ----------
@@ -844,115 +900,98 @@
     }
   }
 
-  function keyName(kind) {
-    const touch = isTouchUi();
-    if (kind === "left") return touch ? "кнопка ВЛЕВО" : "A";
-    if (kind === "right") return touch ? "кнопка ВПРАВО" : "D";
-    return touch ? "кнопка ПРЫЖОК" : "SPACE";
+  function cueArrow(kind) {
+    if (kind === "left") return "◀";
+    if (kind === "right") return "▶";
+    return "▲";
   }
 
-  function sideWord(side) {
-    return side < 0 ? "слева" : "справа";
+  // Which button, spelled out: a key on desktop, the zone itself on a phone.
+  function cueKeyLine(kind) {
+    if (isTouchUi()) return kind === "brace" ? "ТАП ПО ЦЕНТРУ" : "ТАП В ЭТОЙ ЗОНЕ";
+    if (kind === "left") return "КЛАВИША A";
+    if (kind === "right") return "КЛАВИША D";
+    return "КЛАВИША SPACE";
   }
 
-  const TUTOR_STEPS = [
-    {
-      id: "inertia",
-      find: () => (puck.z < 120 ? true : null),
-      text: () =>
-        "Ты внутри шайбы и уже летишь на максимальной скорости. Полоса " +
-        "<b>ИНЕРЦИЯ</b> внизу — запас ошибок: любая ошибка снимает половину, " +
-        "поэтому <b>две ошибки</b> — и попытка кончена. Каждый верный ход " +
-        "возвращает часть полосы.",
-    },
-    {
-      id: "team",
-      find: () =>
-        obstacles.find(
-          (o) => !o.resolved && o.side !== 0 && !o.foe && timeToHit(o) < 0.85 && timeToHit(o) > 0.25
-        ) || null,
-      text: (obs) =>
-        `<b class="ink-team">Синяя</b> клюшка — своя, это пас. Идёт <b>${sideWord(obs.side)}</b>: ` +
-        `подставься той же стороной — <b>${keyName(obs.side < 0 ? "left" : "right")}</b> — ` +
-        "в момент, когда она тебя достаёт. Свои клюшки — твой разгон: " +
-        "точный приём возвращает инерции больше всего.",
-    },
-    {
-      id: "foe",
-      find: () =>
-        obstacles.find(
-          (o) => !o.resolved && o.side !== 0 && o.foe && timeToHit(o) < 0.85 && timeToHit(o) > 0.25
-        ) || null,
-      text: (obs) =>
-        `<b class="ink-foe">Красная</b> клюшка — чужая: подставишься — потеряешь шайбу. ` +
-        `Она <b>${sideWord(obs.side)}</b>, значит уходи в <b>другую</b> сторону — ` +
-        `<b>${keyName(obs.side < 0 ? "right" : "left")}</b>. Уворот только спасает: ` +
-        "инерции он почти не возвращает, поэтому чужие клюшки тебя тормозят.",
-    },
-    {
-      id: "front",
-      find: () =>
-        obstacles.find(
-          (o) => !o.resolved && o.side === 0 && timeToHit(o) < 1 && timeToHit(o) > 0.3
-        ) || null,
-      text: () =>
-        "Поперёк дорожки ложатся только <b class=\"ink-foe\">чужие</b> — в сторону от такой " +
-        `не уйти. Жми <b>${keyName("brace")}</b>: подпрыгнешь и перелетишь её.`,
-    },
-  ];
-
-  function showTutorCard(step, target) {
-    tutorPaused = true;
-    pendingInputs.length = 0;
-    tutorStepEl.textContent = `ШАГ ${tutorStep + 1} ИЗ ${TUTOR_STEPS.length}`;
-    tutorTextEl.innerHTML = step.text(target);
-    tutorEl.hidden = false;
+  function cueWord(kind) {
+    if (kind === "left") return "ВЛЕВО";
+    if (kind === "right") return "ВПРАВО";
+    return "ПРЫЖОК";
   }
 
-  function checkTutor() {
-    if (!tutorOn || tutorPaused) return;
-    const step = TUTOR_STEPS[tutorStep];
-    if (!step) return;
-    const target = step.find();
-    if (!target) return;
-    // The lesson obstacle never drains inertia, so a first fumble is free.
-    if (target !== true) target.free = true;
-    showTutorCard(step, target);
+  function cueCaption(obs) {
+    if (obs.side === 0) return "ЧУЖАЯ ПОПЕРЁК — ПРЫЖОК";
+    return obs.foe ? "ЧУЖАЯ — УХОДИ В ДРУГУЮ" : "СВОЯ — ПОДСТАВЬСЯ";
   }
 
-  function closeTutorCard() {
-    tutorEl.hidden = true;
-    tutorPaused = false;
-    pendingInputs.length = 0;
+  // The stick the hints are pointing at right now, if it is close enough.
+  function tutorTarget() {
+    let best = null;
+    let bestT = Infinity;
+    for (const obs of obstacles) {
+      if (obs.resolved || !obs.lesson) continue;
+      const t = timeToHit(obs);
+      if (t > TUTOR_CUE_LEAD || t < -goodWin() * winMul(obs)) continue;
+      if (t < bestT) {
+        bestT = t;
+        best = obs;
+      }
+    }
+    return best;
   }
 
-  function tutorNext() {
-    closeTutorCard();
-    tutorStep += 1;
-    if (tutorStep >= TUTOR_STEPS.length) endTutor();
+  function tutorTaughtOne(ok) {
+    if (!tutorOn) return;
+    tutorTaught += 1;
+    if (ok) tutorOk += 1;
+    if (tutorTaught < TUTOR_LESSONS) return;
+    // Clean sheet: hints just stop. Any fumble: offer the lesson again.
+    if (tutorOk >= TUTOR_LESSONS) {
+      endTutor();
+      showGrade("ОБУЧЕНИЕ ПРОЙДЕНО", "grade-perfect");
+    } else {
+      offerTutorRetry();
+    }
+  }
+
+  function offerTutorRetry() {
+    tutorOn = false;
+    tutorHideBtn.hidden = true;
+    phase = "tutorfail";
+    updateHud();
+    showReport({
+      title: "ОБУЧЕНИЕ НЕ СОШЛОСЬ",
+      cls: "report-bad",
+      btnLabel: "Пройти обучение ещё раз",
+      action: () => startRun(true),
+      altLabel: "Дальше без подсказок",
+      altAction: () => {
+        markTutorSeen();
+        startRun(false);
+      },
+      note: "Подсказки ничего не стоили: инерция цела, жизни на месте.",
+      rows: [
+        ["Верных ходов", `${tutorOk} из ${TUTOR_LESSONS}`],
+        ["Свои клюшки", "подставься той же стороной"],
+        ["Чужие клюшки", "уходи в другую сторону"],
+        ["Поперёк дорожки", "прыжок"],
+      ],
+    });
   }
 
   function endTutor() {
     tutorOn = false;
-    tutorPaused = false;
-    tutorEl.hidden = true;
+    tutorHideBtn.hidden = true;
     markTutorSeen();
   }
 
   function update(dt) {
-    if (tutorPaused) {
-      pendingInputs.length = 0;
-      return;
-    }
-
     if (phase !== "play") {
       pendingInputs.length = 0;
       updateFx(dt);
       return;
     }
-
-    checkTutor();
-    if (tutorPaused) return;
 
     handleInputs();
     updatePuck(dt);
@@ -1387,6 +1426,151 @@
     }
   }
 
+  const CUE_FONT = '"Segoe UI", system-ui, sans-serif';
+
+  // Three columns of the screen. They are the tap zones, so the coaching
+  // highlight and the touch target are the same thing.
+  function cueZones(slit) {
+    const inset = Math.min(24, slit.h * 0.07);
+    const y = slit.y + inset;
+    const h = slit.h - inset * 2;
+    const third = W / 3;
+    return {
+      left: { x: 0, y, w: third, h },
+      brace: { x: third, y, w: third, h },
+      right: { x: third * 2, y, w: third, h },
+    };
+  }
+
+  function annulus(cx, cy, r0, r1) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r1, 0, Math.PI * 2);
+    ctx.arc(cx, cy, r0, 0, Math.PI * 2, true);
+    ctx.fill();
+  }
+
+  // Timing school: a ring closes in on the target circle, and the green band is
+  // the perfect window. Press while the ring sits in the green.
+  function drawCueTiming(cx, cy, obs, t, scale) {
+    if (t > WINDOW_OPEN) return;
+    const rIn = 26 * scale;
+    const spread = 46 * scale;
+    // Non-linear so the last fraction of a second is not a two-pixel sliver.
+    const mapR = (time) =>
+      rIn + spread * Math.pow(Math.max(0, time) / WINDOW_OPEN, 0.55);
+    const mul = winMul(obs);
+    const rPerfect = mapR(perfectWin() * mul);
+    const rGood = mapR(goodWin() * mul);
+    const inPerfect = Math.abs(t) <= perfectWin() * mul;
+
+    ctx.fillStyle = "rgba(232,244,255,0.1)";
+    annulus(cx, cy, rIn, rGood);
+    ctx.fillStyle = inPerfect ? "rgba(120,255,180,0.4)" : "rgba(110,240,170,0.2)";
+    annulus(cx, cy, rIn, rPerfect);
+
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = `rgba(130,255,190,${inPerfect ? 0.95 : 0.6})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rPerfect, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // The closing ring itself.
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = inPerfect ? "rgba(190,255,220,0.98)" : "rgba(255,255,255,0.75)";
+    ctx.beginPath();
+    ctx.arc(cx, cy, mapR(t), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Coaching overlay: light up the column to hit, name the button, and show the
+  // moment. No pause and no wall of text.
+  function drawTutorCue(slit) {
+    if (!tutorOn || phase !== "play") return;
+    const obs = tutorTarget();
+    if (!obs) return;
+
+    const zones = cueZones(slit);
+    const target = zones[obs.want];
+    if (!target) return;
+
+    const t = timeToHit(obs);
+    const near = Math.max(0, Math.min(1, 1 - t / TUTOR_CUE_LEAD));
+    // Dim while the stick is far, full brightness inside the hit window.
+    const live = obs.windowOpen ? 1 : 0.35 + 0.45 * near;
+    const rgb = obs.foe ? "255,70,100" : "90,200,255";
+    const scale = Math.max(0.78, Math.min(1.15, W / 900));
+
+    ctx.save();
+    ctx.lineJoin = "round";
+
+    // All three columns marked, so the pick reads as a choice of three.
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = `rgba(232,244,255,${0.07 + 0.06 * near})`;
+    ctx.setLineDash([6, 9]);
+    for (const key of ["brace", "right"]) {
+      const z = zones[key];
+      ctx.beginPath();
+      ctx.moveTo(z.x, z.y);
+      ctx.lineTo(z.x, z.y + z.h);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // The column to hit, lit from the floor up so the lane stays readable.
+    const g = ctx.createLinearGradient(0, target.y + target.h, 0, target.y);
+    g.addColorStop(0, `rgba(${rgb},${0.3 * live})`);
+    g.addColorStop(1, `rgba(${rgb},0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(target.x, target.y, target.w, target.h);
+
+    const cx = target.x + target.w / 2;
+    const cy = target.y + target.h * 0.58;
+
+    drawCueTiming(cx, cy, obs, t, scale);
+
+    // Arrow in the ring, then the button to press and where it takes you.
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = `rgba(255,255,255,${0.6 + 0.4 * live})`;
+    ctx.font = `800 ${22 * scale}px ${CUE_FONT}`;
+    ctx.fillText(cueArrow(obs.want), cx, cy);
+
+    const below = cy + 92 * scale;
+    ctx.font = `800 ${16 * scale}px ${CUE_FONT}`;
+    ctx.fillText(cueKeyLine(obs.want), cx, below);
+    ctx.font = `700 ${12 * scale}px ${CUE_FONT}`;
+    ctx.fillStyle = `rgba(232,244,255,${0.5 + 0.4 * live})`;
+    ctx.fillText(cueWord(obs.want), cx, below + 20 * scale);
+
+    // Two lines up in the dark strip: the rule, then the timing.
+    ctx.font = `700 ${15 * scale}px ${CUE_FONT}`;
+    ctx.fillStyle = `rgba(${rgb},${0.6 + 0.4 * near})`;
+    ctx.fillText(cueCaption(obs), W / 2, slit.y + 30);
+    ctx.font = `700 ${12 * scale}px ${CUE_FONT}`;
+    ctx.fillStyle = "rgba(150,255,200,0.75)";
+    ctx.fillText("ЖМИ, КОГДА КОЛЬЦО ВОЙДЁТ В ЗЕЛЁНОЕ", W / 2, slit.y + 52);
+    ctx.restore();
+  }
+
+  // Faint column split so the tap zones are discoverable without a lesson.
+  function drawTapZones(slit) {
+    if (!isTouchUi() || phase !== "play" || tutorOn) return;
+    const third = W / 3;
+    const top = slit.y + slit.h * 0.55;
+    const bottom = slit.y + slit.h;
+    ctx.save();
+    ctx.strokeStyle = "rgba(232,244,255,0.07)";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 10]);
+    for (const x of [third, third * 2]) {
+      ctx.beginPath();
+      ctx.moveTo(x, top);
+      ctx.lineTo(x, bottom);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function drawDamageFlash(slit) {
     if (damageFlash <= 0) return;
     const a = damageFlash * 0.45;
@@ -1465,6 +1649,8 @@
     drawSlitBody(slit);
     drawHitFlash(slit);
     drawDamageFlash(slit);
+    drawTapZones(slit);
+    drawTutorCue(slit);
   }
 
   function loop(ts) {
@@ -1478,20 +1664,23 @@
   // ---------- INPUT ----------
 
   function queueInput(code) {
-    if (tutorPaused) {
-      if (code === "brace") tutorNext();
-      return;
-    }
     if (phase === "ready") {
       if (code === "brace") startRun();
       return;
     }
     if (phase !== "play") {
-      // Between rounds the same button confirms the report.
-      if (code === "brace") runContinue();
+      // Between rounds any input confirms the report — no dead taps on a phone.
+      runContinue();
       return;
     }
     pendingInputs.push(code);
+  }
+
+  function zoneFromX(x) {
+    const third = W / 3;
+    if (x < third) return "left";
+    if (x > third * 2) return "right";
+    return "brace";
   }
 
   window.addEventListener("keydown", (e) => {
@@ -1527,25 +1716,33 @@
     }
   }
 
+  // The whole view is three lanes: a press anywhere picks the column it lands in.
+  // HUD buttons sit above the canvas, so they never double-fire through this.
+  canvas.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    queueInput(zoneFromX(e.clientX - rect.left));
+  });
+
   restartBtn.addEventListener("click", () => {
     if (pendingContinue) {
       runContinue();
       return;
     }
-    introEl.hidden = true;
+    showIntro(false);
     resetRun({ keepLives: false, keepStreak: false, keepGoals: false });
   });
 
   startBtn.addEventListener("click", () => startRun());
 
   // Blur first: a focused button would also react to the SPACE we use in play.
-  tutorNextBtn.addEventListener("click", () => {
-    tutorNextBtn.blur();
-    tutorNext();
-  });
-  tutorSkipBtn.addEventListener("click", () => {
-    tutorSkipBtn.blur();
+  tutorHideBtn.addEventListener("click", () => {
+    tutorHideBtn.blur();
     endTutor();
+  });
+  reportAltBtn.addEventListener("click", () => {
+    reportAltBtn.blur();
+    runAlternative();
   });
   tutorAgainBtn.addEventListener("click", () => {
     tutorAgainBtn.blur();

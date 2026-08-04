@@ -59,17 +59,12 @@
     <div id="brace-flash" hidden></div>
     <div id="status" hidden></div>
     <button id="restart-btn" type="button" hidden>Ещё раз</button>
+    <button id="report-alt" type="button" class="ghost-btn" hidden></button>
 
-    <div id="tutor" hidden>
-      <div class="tutor-step" id="tutor-step"></div>
-      <div class="tutor-text" id="tutor-text"></div>
-      <div class="tutor-actions">
-        <button id="tutor-next" type="button">Понятно</button>
-        <button id="tutor-skip" type="button" class="ghost-btn">Пропустить обучение</button>
-      </div>
-    </div>
+    <button id="tutor-hide" type="button" class="ghost-btn" hidden>Скрыть подсказки</button>
 
     <div id="intro">
+      <div class="intro-panel">
       <h1>Свои и чужие</h1>
       <p class="intro-sub">Ты смотришь изнутри шайбы и стартуешь на полной скорости. По цвету клюшки решай: подставиться или уйти. Инерция — запас ошибок: две ошибки, и попытка кончена.</p>
       <ol class="intro-list">
@@ -79,8 +74,10 @@
         <li>Любая ошибка снимает <b>половину</b> полосы инерции. Метка на полосе — рубеж: ниже неё осталась одна ошибка.</li>
         <li><b>Жизни</b> — сколько раз можно не долететь до ворот. <b>Серия</b> — голы на текущих трёх жизнях. Каждая попытка чуть сложнее: чужих больше, окно уже.</li>
       </ol>
+      <p class="intro-note">Первые клюшки подскажут сами: нужная зона загорится, на ней будет кнопка, а кольцо покажет момент нажатия. На телефоне можно просто тапать по левой, центральной или правой части экрана.</p>
       <button id="start-btn" type="button">Поехали</button>
-      <button id="tutor-again" type="button" class="ghost-btn" hidden>Пройти обучение заново</button>
+      <button id="tutor-again" type="button" class="ghost-btn" hidden>Показать подсказки снова</button>
+      </div>
     </div>
   </div>
 
