@@ -98,8 +98,8 @@ body {
   right: 0;
   bottom: 0;
   padding: 10px 18px 14px;
-  /* Keep the gradient short so the puck rim above stays clear. */
-  background: linear-gradient(transparent, rgba(2, 6, 12, 0.55) 35%, rgba(2, 6, 12, 0.88));
+  /* Start under the slit lip so the viewing frame stays clear. */
+  background: linear-gradient(transparent 0%, rgba(2, 6, 12, 0.45) 28%, rgba(2, 6, 12, 0.9) 70%);
 }
 
 .grip-wrap {
@@ -233,12 +233,17 @@ body {
   .hud-bottom {
     padding-bottom: max(14px, env(safe-area-inset-bottom));
   }
+
+  /* Back link sits top-left here — clear the HUD row out from under it. */
+  .hud-top {
+    padding-top: 48px;
+  }
 }
 
 #brace-flash {
   position: absolute;
   left: 50%;
-  top: 42%;
+  top: 52%;
   transform: translate(-50%, -50%);
   padding: 10px 22px;
   border-radius: 10px;
@@ -268,23 +273,53 @@ body {
 #status {
   position: absolute;
   left: 50%;
-  top: 36%;
+  top: 42%;
   transform: translate(-50%, -50%);
-  padding: 16px 28px;
-  border-radius: 12px;
-  background: rgba(6, 14, 28, 0.88);
+  min-width: 300px;
+  padding: 18px 26px;
+  border-radius: 14px;
+  background: rgba(6, 14, 28, 0.94);
   border: 1px solid rgba(232, 244, 255, 0.25);
-  font-size: 28px;
-  font-weight: 800;
   text-align: center;
   line-height: 1.3;
+}
+
+#status.report-good { border-color: rgba(46, 204, 113, 0.6); }
+#status.report-bad { border-color: rgba(231, 76, 60, 0.6); }
+
+.report-title {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.report-rows {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(232, 244, 255, 0.14);
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.report-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  color: rgba(232, 244, 255, 0.66);
+}
+
+.report-row b {
+  color: #e8f4ff;
+  font-weight: 700;
 }
 
 #restart-btn {
   pointer-events: auto;
   position: absolute;
   left: 50%;
-  top: 52%;
+  top: 64%;
   transform: translate(-50%, -50%);
   padding: 10px 22px;
   border: none;

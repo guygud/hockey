@@ -14,10 +14,19 @@
   const introEl = document.getElementById("intro");
   const startBtn = document.getElementById("start-btn");
 
-  const CORRIDOR = { halfW: 200, wallH: 150, ribStep: 60, ceilH: 180 };
-  // far covers the whole short track so the net is visible from the first frame.
-  const CAM = { height: 34, focal: 460, near: 12, far: 2800, horizonFrac: 0.42 };
-  const RUN_DIST = 2500;
+  const CORRIDOR = { halfW: 200, ribStep: 60 };
+  // Eye sits low over the ice; far covers the short track so the net is visible.
+  // near is short so a braced stick stays in frame while it slides past the eye.
+  // far reaches past RUN_DIST so the net is in frame from the first metre.
+  const CAM = { height: 22, focal: 460, near: 6, far: 3400, horizonFrac: 0.42 };
+  // Viewing slit through the puck body — a full-width band, no side frame.
+  const SLIT = {
+    topAboveHorizon: 140,
+    bottomFrac: 0.86,
+    bottomFracTouch: 0.8,
+    openMax: 14,
+  };
+  const RUN_DIST = 3000;
   const MAX_LIVES = 3;
   const SPEED_MIN = 130;
   const SPEED_MAX = 530;
@@ -27,9 +36,14 @@
   const WINDOW_OPEN = 0.9;
   const PERFECT = 0.08;
   const GOOD = 0.2;
-  const INTERVAL_START = 1.15;
-  const INTERVAL_END = 0.7;
+  const INTERVAL_START = 1.6;
+  const INTERVAL_END = 1.05;
   const GRADE_FLASH_TIME = 0.55;
+  const TREMBLE_DECAY = 1.7;
+  // How far past the hit line a resolved stick keeps sliding by.
+  const SLIP_SPAN = 160;
+  const NEAR_W_CAP = 56;
+  const CONFIRM_DELAY = 450;
 
   let W = 0;
   let H = 0;
@@ -49,17 +63,112 @@
   let goals;
   let phase; // ready | play | scored | missed | stalled
   let runDist;
-  let shake;
   let tilt;
   let braceLean;
   let wobble;
   let camBoost;
-  let pushZ;
+  let camBoostVel;
+  let camZ;
+  let camZVel;
+  let slitOpen;
+  let slitOpenVel;
+  let tremble;
+  let damageFlash;
+  let hitFlash;
+  let hitFlashPerfect;
+  let boostFx;
   let lastSpawnZ;
   let finalSpawned;
   let gradeFlashTimer;
   let gradeFlashText;
   let gradeFlashClass;
+  let runStats;
+  let pendingContinue = null;
+  let confirmAt = 0;
+
+  // ---------- AUDIO ----------
+
+  let audioCtx = null;
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      audioCtx = new AC();
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    return audioCtx;
+  }
+
+  function tone(freqFrom, freqTo, dur, gain, type) {
+    const ac = ensureAudio();
+    if (!ac) return;
+    const t = ac.currentTime;
+    const osc = ac.createOscillator();
+    const g = ac.createGain();
+    osc.type = type || "square";
+    osc.frequency.setValueAtTime(freqFrom, t);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(30, freqTo), t + dur);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(gain, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g).connect(ac.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  }
+
+  // Short filtered noise burst — the scrape of a stick sliding off the puck.
+  function swish(dur, gain, freq, q) {
+    const ac = ensureAudio();
+    if (!ac) return;
+    const t = ac.currentTime;
+    const len = Math.floor(ac.sampleRate * dur);
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    }
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    const bp = ac.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = freq;
+    bp.Q.value = q || 1.2;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(bp).connect(g).connect(ac.destination);
+    src.start(t);
+  }
+
+  function sfxHit(perfect) {
+    if (perfect) {
+      tone(760, 1500, 0.1, 0.16, "square");
+      tone(380, 620, 0.16, 0.1, "triangle");
+      swish(0.22, 0.16, 2600, 0.9);
+    } else {
+      tone(480, 800, 0.09, 0.11, "square");
+      swish(0.18, 0.11, 1800, 0.9);
+    }
+  }
+
+  function sfxFail() {
+    tone(180, 60, 0.26, 0.2, "sawtooth");
+    swish(0.3, 0.14, 320, 0.7);
+  }
+
+  function sfxWhiff() {
+    swish(0.1, 0.06, 900, 1.6);
+  }
+
+  function sfxGoal() {
+    tone(520, 780, 0.12, 0.14, "square");
+    setTimeout(() => tone(780, 1170, 0.18, 0.14, "square"), 110);
+  }
+
+  function sfxStall() {
+    tone(300, 90, 0.5, 0.16, "triangle");
+  }
 
   function createPuck() {
     return {
@@ -82,6 +191,8 @@
       side,
       type: side === 0 ? "cross" : "stick",
       resolved: false,
+      ok: false,
+      flip: Math.random() < 0.5 ? -1 : 1,
       answer: null,
       windowOpen: false,
     };
@@ -128,12 +239,21 @@
     puck = createPuck();
     obstacles = [];
     particles = [];
-    shake = 0;
     tilt = 0;
     braceLean = 0;
     wobble = 0;
     camBoost = 0;
-    pushZ = 0;
+    camBoostVel = 0;
+    camZ = 0;
+    camZVel = 0;
+    slitOpen = 0;
+    slitOpenVel = 0;
+    tremble = 0;
+    damageFlash = 0;
+    hitFlash = 0;
+    hitFlashPerfect = false;
+    boostFx = 0;
+    runStats = { perfect: 0, good: 0, wrong: 0, missed: 0 };
     lastSpawnZ = 280;
     finalSpawned = false;
     gradeFlashTimer = 0;
@@ -143,7 +263,9 @@
     framePresses = [];
     phase = "play";
     if (!opts.keepGoals) goals = 0;
+    pendingContinue = null;
     statusEl.hidden = true;
+    statusEl.className = "";
     restartBtn.hidden = true;
     braceFlash.hidden = true;
     braceFlash.className = "";
@@ -158,6 +280,7 @@
   }
 
   function startRun() {
+    ensureAudio();
     introEl.hidden = true;
     resetRun({ keepLives: false, keepStreak: false, keepGoals: false });
     phase = "play";
@@ -184,7 +307,7 @@
   }
 
   function project(x, z) {
-    const d = z - puck.z + pushZ;
+    const d = z - puck.z + camZ;
     if (d < CAM.near || d > CAM.far) return null;
     const k = CAM.focal / d;
     return {
@@ -193,6 +316,28 @@
       k,
       d,
     };
+  }
+
+  function isTouchUi() {
+    return document.body.classList.contains("touch-ui");
+  }
+
+  function slitRect() {
+    const open = slitOpen;
+    const top = H * CAM.horizonFrac - SLIT.topAboveHorizon - open * 0.35;
+    const bottomFrac = isTouchUi() ? SLIT.bottomFracTouch : SLIT.bottomFrac;
+    const bottom = H * bottomFrac + open * 0.65;
+    return {
+      x: 0,
+      y: Math.max(0, top),
+      w: W,
+      h: Math.max(40, bottom - top),
+    };
+  }
+
+  function slitPath(slit) {
+    ctx.beginPath();
+    ctx.rect(slit.x, slit.y, slit.w, slit.h);
   }
 
   function projectHeight(x, z, worldH) {
@@ -239,46 +384,63 @@
   function resolveSuccess(obs, grade) {
     if (obs.resolved) return;
     obs.resolved = true;
+    obs.ok = true;
+    const perfect = grade === "perfect";
     // Goal streak only boosts hit rewards — it does not grow on stick hits.
     const mult = streakMult();
-    if (grade === "perfect") {
-      applyMom(0.26 * mult);
-      showGrade("ИДЕАЛЬНО", "grade-perfect");
-      braceLean = obs.side * 28;
-      pushZ = 18;
-      spawnSparks(14);
-      if (obs.side === 0) camBoost = 22;
-      shake = 0.12;
+
+    applyMom((perfect ? 0.26 : 0.14) * mult);
+    showGrade(perfect ? "ИДЕАЛЬНО" : "ХОРОШО", perfect ? "grade-perfect" : "grade-good");
+    runStats[perfect ? "perfect" : "good"] += 1;
+
+    // Camera rears back off the hit, slit flares open, lane streaks.
+    camZVel += perfect ? 260 : 165;
+    slitOpenVel += perfect ? 130 : 85;
+    hitFlash = 1;
+    hitFlashPerfect = perfect;
+    boostFx = perfect ? 1 : 0.7;
+    spawnSparks(perfect ? 18 : 10);
+
+    if (obs.side === 0) {
+      // Frontal stick: you hop over it instead of leaning aside.
+      camBoostVel += perfect ? 420 : 290;
+      braceLean = 0;
+      tilt = 0;
     } else {
-      applyMom(0.14 * mult);
-      showGrade("ХОРОШО", "grade-good");
-      braceLean = obs.side * 20;
-      pushZ = 10;
-      spawnSparks(8);
-      if (obs.side === 0) camBoost = 14;
-      shake = 0.08;
+      braceLean = obs.side * (perfect ? 40 : 26);
+      tilt = obs.side * (perfect ? 0.055 : 0.035);
     }
+
+    sfxHit(perfect);
     updateHud();
   }
 
   function resolveFail(obs, reason) {
     if (obs.resolved) return;
     obs.resolved = true;
+    obs.ok = false;
 
     // Stick mistakes only cost momentum — lives are for failed runs to the net.
+    // Sticks come rarer now, so a single mistake must not end the run outright.
     if (reason === "wrong") {
-      applyMom(-0.26);
+      applyMom(-0.18);
       showGrade("НЕ ТУДА", "grade-miss");
+      runStats.wrong += 1;
     } else {
-      applyMom(-0.32);
+      applyMom(-0.22);
       showGrade("ПРОПУСК", "grade-miss");
+      runStats.missed += 1;
     }
 
-    shake = 0.45;
+    tremble = 1;
+    damageFlash = 1;
+    camZVel -= 60;
+    slitOpenVel -= 70;
     tilt = (Math.random() < 0.5 ? -1 : 1) * 0.1;
     wobble = 1;
     braceLean = obs.side * -12;
     spawnSparks(6);
+    sfxFail();
     updateHud();
   }
 
@@ -318,6 +480,7 @@
       applyMom(-0.05);
       showGrade("ПУСТО", "grade-whiff");
       wobble = 0.4;
+      sfxWhiff();
       updateHud();
       return;
     }
@@ -407,13 +570,41 @@
   }
 
   function updateFx(dt) {
-    if (shake > 0) shake = Math.max(0, shake - dt * 1.8);
     tilt *= 0.88;
     braceLean *= Math.pow(0.08, dt);
     if (Math.abs(braceLean) < 0.2) braceLean = 0;
     wobble = Math.max(0, wobble - dt * 2.5);
-    camBoost = Math.max(0, camBoost - dt * 40);
-    pushZ = Math.max(0, pushZ - dt * 50);
+
+    // Hop spring: eye lifts over a frontal stick, then settles back down.
+    camBoostVel += (-camBoost * 30 - camBoostVel * 6) * dt;
+    camBoost += camBoostVel * dt;
+    if (Math.abs(camBoost) < 0.05 && Math.abs(camBoostVel) < 0.5) {
+      camBoost = 0;
+      camBoostVel = 0;
+    }
+
+    hitFlash = Math.max(0, hitFlash - dt * 3.2);
+    boostFx = Math.max(0, boostFx - dt * 1.6);
+
+    // Camera spring: +camZ = pulled back (success), -camZ = shoved forward (fail).
+    camZVel += (-camZ * 26 - camZVel * 7.5) * dt;
+    camZ += camZVel * dt;
+    if (Math.abs(camZ) < 0.05 && Math.abs(camZVel) < 0.5) {
+      camZ = 0;
+      camZVel = 0;
+    }
+
+    // Slit opens on clean hits, cinches shut on mistakes.
+    slitOpenVel += (-slitOpen * 22 - slitOpenVel * 6.5) * dt;
+    slitOpen += slitOpenVel * dt;
+    slitOpen = Math.max(-SLIT.openMax * 0.6, Math.min(SLIT.openMax, slitOpen));
+    if (Math.abs(slitOpen) < 0.05 && Math.abs(slitOpenVel) < 0.5) {
+      slitOpen = 0;
+      slitOpenVel = 0;
+    }
+
+    tremble = Math.max(0, tremble - dt * TREMBLE_DECAY);
+    damageFlash = Math.max(0, damageFlash - dt * 2.2);
 
     if (gradeFlashTimer > 0) {
       gradeFlashTimer -= dt;
@@ -424,50 +615,83 @@
     }
   }
 
+  function reportRows() {
+    const pct = Math.round(Math.min(1, puck.z / runDist) * 100);
+    const hits = runStats.perfect + runStats.good;
+    const total = hits + runStats.wrong + runStats.missed;
+    return [
+      ["Дистанция", `${pct}%`],
+      ["Принял ударов", `${hits} из ${total}`],
+      ["Идеально", String(runStats.perfect)],
+      ["Мимо / пропустил", `${runStats.wrong} / ${runStats.missed}`],
+      ["Жизни · серия", `${lives} · ${streak}`],
+    ];
+  }
+
+  // Round always ends on a report the player dismisses — never auto-restarts.
+  function showReport(title, cls, btnLabel, action) {
+    braceFlash.hidden = true;
+    statusEl.hidden = false;
+    statusEl.className = cls;
+    statusEl.innerHTML =
+      `<div class="report-title">${title}</div>` +
+      `<div class="report-rows">` +
+      reportRows()
+        .map(([k, v]) => `<div class="report-row"><span>${k}</span><b>${v}</b></div>`)
+        .join("") +
+      `</div>`;
+    restartBtn.hidden = false;
+    restartBtn.textContent = btnLabel;
+    pendingContinue = action;
+    confirmAt = performance.now() + CONFIRM_DELAY;
+  }
+
+  function runContinue() {
+    if (!pendingContinue) return;
+    if (performance.now() < confirmAt) return;
+    const next = pendingContinue;
+    pendingContinue = null;
+    next();
+  }
+
   function onScored() {
     phase = "scored";
     streak += 1;
     goals += 1;
-    statusEl.hidden = false;
-    statusEl.innerHTML =
-      `ГОЛ!<br><span style="font-size:18px;font-weight:600">Серия ${streak}</span>`;
-    braceFlash.hidden = true;
+    sfxGoal();
     updateHud();
-    setTimeout(() => {
-      if (phase !== "scored") return;
+    showReport(`ГОЛ! Серия ${streak}`, "report-good", "Следующая атака →", () => {
       // Same life bank: keep hearts and the goal streak.
       resetRun({ keepLives: true, keepStreak: true, keepGoals: true });
-    }, 1400);
+    });
   }
 
   function onStalled() {
     if (phase !== "play") return;
 
     lives = Math.max(0, lives - 1);
-    const pct = Math.round(Math.min(1, puck.z / runDist) * 100);
-    braceFlash.hidden = true;
-    updateHud();
+    sfxStall();
 
     if (lives <= 0) {
       // Three failed runs → streak dies with the life bank.
       phase = "stalled";
+      const finalGoals = goals;
       streak = 0;
-      statusEl.hidden = false;
-      statusEl.innerHTML =
-        `НЕ ДОЛЕТЕЛ<br><span style="font-size:18px;font-weight:600">Жизни кончились · серия сброшена · ${pct}%</span>`;
-      restartBtn.hidden = false;
       updateHud();
+      showReport(
+        `ЖИЗНИ КОНЧИЛИСЬ · голов ${finalGoals}`,
+        "report-bad",
+        "Начать заново",
+        () => resetRun({ keepLives: false, keepStreak: false, keepGoals: false })
+      );
       return;
     }
 
     phase = "missed";
-    statusEl.hidden = false;
-    statusEl.innerHTML =
-      `НЕ ДОЛЕТЕЛ<br><span style="font-size:18px;font-weight:600">Осталось жизней: ${lives} · серия ${streak}</span>`;
-    setTimeout(() => {
-      if (phase !== "missed") return;
+    updateHud();
+    showReport("ИНЕРЦИЯ КОНЧИЛАСЬ", "report-bad", "Ещё попытка →", () => {
       resetRun({ keepLives: true, keepStreak: true, keepGoals: true });
-    }, 1200);
+    });
   }
 
   function update(dt) {
@@ -498,27 +722,25 @@
 
   // ---------- RENDER ----------
 
-  function drawCeiling() {
+  function drawArenaStrip() {
+    // Narrow band of arena above the horizon — sky is cut by the slit frame.
     const horizon = H * CAM.horizonFrac;
-    const grad = ctx.createLinearGradient(0, 0, 0, horizon);
-    grad.addColorStop(0, "#0a1524");
-    grad.addColorStop(1, "#152a42");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, horizon);
+    const top = horizon - SLIT.topAboveHorizon - 60;
+    const g = ctx.createLinearGradient(0, top, 0, horizon);
+    g.addColorStop(0, "#05090f");
+    g.addColorStop(0.5, "#0b1522");
+    g.addColorStop(1, "#1a3048");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, top, W, horizon - top + 2);
 
-    const start = Math.floor(puck.z / CORRIDOR.ribStep) * CORRIDOR.ribStep;
-    for (let i = 0; i < 40; i++) {
-      const z = start + i * CORRIDOR.ribStep;
-      const p = projectHeight(0, z, CORRIDOR.ceilH);
-      if (!p || p.sy > horizon) continue;
-      ctx.strokeStyle = `rgba(120,170,210,${Math.max(0.05, 0.35 - i * 0.008)})`;
-      ctx.lineWidth = Math.max(1, 2 * p.k);
+    // Dim stands silhouette so the far end is not an empty void.
+    ctx.strokeStyle = "rgba(90, 130, 165, 0.16)";
+    ctx.lineWidth = 1;
+    for (let i = 1; i <= 3; i++) {
+      const y = horizon - (SLIT.topAboveHorizon * i) / 4;
       ctx.beginPath();
-      const left = projectHeight(-CORRIDOR.halfW, z, CORRIDOR.ceilH);
-      const right = projectHeight(CORRIDOR.halfW, z, CORRIDOR.ceilH);
-      if (!left || !right) continue;
-      ctx.moveTo(left.sx, left.sy);
-      ctx.lineTo(right.sx, right.sy);
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
       ctx.stroke();
     }
   }
@@ -526,89 +748,56 @@
   function drawFloor() {
     const horizon = H * CAM.horizonFrac;
 
-    const farL = project(-CORRIDOR.halfW, puck.z + CAM.far * 0.85);
-    const farR = project(CORRIDOR.halfW, puck.z + CAM.far * 0.85);
-    const nearL = project(-CORRIDOR.halfW, puck.z + CAM.near + 2);
-    const nearR = project(CORRIDOR.halfW, puck.z + CAM.near + 2);
+    // Ice fills the whole frame; the lane is only where the puck can travel.
+    const g = ctx.createLinearGradient(0, horizon, 0, H);
+    g.addColorStop(0, "#2f5470");
+    g.addColorStop(0.3, "#4d7893");
+    g.addColorStop(1, "#6f97ae");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, horizon, W, H - horizon);
 
-    ctx.beginPath();
-    if (farL && farR && nearL && nearR) {
-      ctx.moveTo(farL.sx, farL.sy);
-      ctx.lineTo(farR.sx, farR.sy);
-      ctx.lineTo(nearR.sx, nearR.sy);
-      ctx.lineTo(nearL.sx, nearL.sy);
-      ctx.closePath();
-      const g = ctx.createLinearGradient(0, horizon, 0, H);
-      g.addColorStop(0, "#7eafca");
-      g.addColorStop(0.4, "#b4d6e8");
-      g.addColorStop(1, "#dff0f8");
-      ctx.fillStyle = g;
-      ctx.fill();
-    } else {
-      ctx.fillStyle = "#b4d6e8";
-      ctx.fillRect(0, horizon, W, H - horizon);
-    }
-
-    // Floor rungs (world-locked).
+    // A rung is a line of constant depth, so it spans the frame at a single height.
     const start = Math.floor(puck.z / CORRIDOR.ribStep) * CORRIDOR.ribStep;
-    for (let i = 0; i < 45; i++) {
+    for (let i = 0; i < 60; i++) {
       const z = start + i * CORRIDOR.ribStep;
-      const a = project(-CORRIDOR.halfW, z);
-      const b = project(CORRIDOR.halfW, z);
-      if (!a || !b) continue;
-      const alpha = Math.max(0.04, 0.4 - i * 0.009);
+      const p = project(0, z);
+      if (!p) continue;
+      const alpha = Math.max(0.05, 0.42 - i * 0.008);
       ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
-      ctx.lineWidth = Math.max(1, a.k * 1.5);
+      ctx.lineWidth = Math.max(1.2, p.k * 1.6);
       ctx.beginPath();
-      ctx.moveTo(a.sx, a.sy);
-      ctx.lineTo(b.sx, b.sy);
+      ctx.moveTo(0, p.sy);
+      ctx.lineTo(W, p.sy);
       ctx.stroke();
     }
   }
 
-  function drawWalls() {
-    const start = Math.floor(puck.z / CORRIDOR.ribStep) * CORRIDOR.ribStep;
+  function drawLane() {
+    const farZ = puck.z + CAM.far * 0.9;
+    const nearZ = puck.z + CAM.near + 2;
+    const farL = project(-CORRIDOR.halfW, farZ);
+    const farR = project(CORRIDOR.halfW, farZ);
+    const nearL = project(-CORRIDOR.halfW, nearZ);
+    const nearR = project(CORRIDOR.halfW, nearZ);
+    if (!farL || !farR || !nearL || !nearR) return;
 
-    for (const side of [-1, 1]) {
-      const x = side * CORRIDOR.halfW;
+    // Lit strip: ice runs everywhere, but this is the road the puck is on.
+    ctx.fillStyle = "rgba(216, 240, 255, 0.1)";
+    ctx.beginPath();
+    ctx.moveTo(farL.sx, farL.sy);
+    ctx.lineTo(farR.sx, farR.sy);
+    ctx.lineTo(nearR.sx, nearR.sy);
+    ctx.lineTo(nearL.sx, nearL.sy);
+    ctx.closePath();
+    ctx.fill();
 
-      for (let i = 0; i < 36; i++) {
-        const z0 = start + i * CORRIDOR.ribStep;
-        const z1 = z0 + CORRIDOR.ribStep;
-        const b0 = project(x, z0);
-        const t0 = projectHeight(x, z0, CORRIDOR.wallH);
-        const b1 = project(x, z1);
-        const t1 = projectHeight(x, z1, CORRIDOR.wallH);
-        if (!b0 || !t0 || !b1 || !t1) continue;
-
-        ctx.beginPath();
-        ctx.moveTo(b0.sx, b0.sy);
-        ctx.lineTo(t0.sx, t0.sy);
-        ctx.lineTo(t1.sx, t1.sy);
-        ctx.lineTo(b1.sx, b1.sy);
-        ctx.closePath();
-        const shade = 0.22 + (i % 2) * 0.04;
-        ctx.fillStyle = side < 0
-          ? `rgba(30,55,80,${0.85 - i * 0.012})`
-          : `rgba(25,48,72,${0.85 - i * 0.012})`;
-        ctx.fill();
-        ctx.strokeStyle = `rgba(180,210,235,${shade})`;
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      }
-
-      for (let i = 0; i < 40; i++) {
-        const z = start + i * CORRIDOR.ribStep;
-        const b = project(x, z);
-        const t = projectHeight(x, z, CORRIDOR.wallH);
-        if (!b || !t) continue;
-        ctx.strokeStyle = `rgba(220,235,255,${Math.max(0.08, 0.55 - i * 0.012)})`;
-        ctx.lineWidth = Math.max(1.5, 3 * b.k);
-        ctx.beginPath();
-        ctx.moveTo(b.sx, b.sy);
-        ctx.lineTo(t.sx, t.sy);
-        ctx.stroke();
-      }
+    ctx.strokeStyle = "rgba(195, 228, 250, 0.42)";
+    ctx.lineWidth = 2;
+    for (const [a, b] of [[farL, nearL], [farR, nearR]]) {
+      ctx.beginPath();
+      ctx.moveTo(a.sx, a.sy);
+      ctx.lineTo(b.sx, b.sy);
+      ctx.stroke();
     }
   }
 
@@ -622,7 +811,19 @@
     const bases = [project(-half, z), project(half, z)];
     if (!posts[0] || !posts[1] || !bases[0] || !bases[1]) return;
 
-    // Soft fill so the net reads even when far.
+    // Soft red halo so the net reads through the slit from the first frame.
+    const cx = (bases[0].sx + bases[1].sx) / 2;
+    const cy = (posts[0].sy + bases[0].sy) / 2;
+    const glowR = Math.max(30, Math.abs(bases[1].sx - bases[0].sx) * 0.7);
+    const glow = ctx.createRadialGradient(cx, cy, 4, cx, cy, glowR);
+    glow.addColorStop(0, "rgba(255, 60, 60, 0.35)");
+    glow.addColorStop(0.55, "rgba(255, 40, 40, 0.12)");
+    glow.addColorStop(1, "rgba(255, 40, 40, 0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
+    ctx.fill();
+
     ctx.fillStyle = "rgba(255, 45, 45, 0.22)";
     ctx.beginPath();
     ctx.moveTo(bases[0].sx, bases[0].sy);
@@ -673,13 +874,29 @@
     ctx.fill();
   }
 
+  // Dissolve a stick as it slides by, and again right at the eye so it never smears.
+  function passAlpha(slip, d) {
+    const bySlip = Math.pow(Math.max(0, 1 - slip), 0.9);
+    const byDist = Math.min(1, Math.max(0, (d - CAM.near) / 70));
+    return bySlip * byDist;
+  }
+
+  // 0 until resolved, then 1 as the stick finishes sliding past the puck.
+  function slipProgress(obs) {
+    if (!obs.resolved) return 0;
+    return Math.max(0, Math.min(1, (puck.z + HIT_LINE - obs.z) / SLIP_SPAN));
+  }
+
   function drawStick(obs) {
     const p = strikeProgress(obs);
     // Ease-in so the blade snaps across late — feels like a slap flying at you.
     const swing = p * p * (3 - 2 * p);
     const side = obs.side;
-    const tipX = side * (CORRIDOR.halfW * (1 - swing * 0.92));
-    const gripX = side * (CORRIDOR.halfW * (0.95 - swing * 0.25));
+    // A braced stick skids back out to its side; a bad one drags across the middle.
+    const slip = slipProgress(obs);
+    const push = obs.ok ? slip * 1.1 : slip * 0.35;
+    const tipX = side * (CORRIDOR.halfW * (1 - swing * 0.92 + push));
+    const gripX = side * (CORRIDOR.halfW * (0.95 - swing * 0.25 + push * 0.5));
     const tipZ = obs.z - swing * 40;
     const gripZ = obs.z + 8;
 
@@ -691,8 +908,10 @@
     if (!grip || !tip || !bladeEnd) return;
 
     const hot = obs.windowOpen && !obs.resolved;
+    ctx.save();
+    ctx.globalAlpha = passAlpha(slip, tip.d);
     ctx.strokeStyle = hot ? "#ff7a18" : "#1a2030";
-    ctx.lineWidth = Math.max(3, (5 + swing * 3) * tip.k);
+    ctx.lineWidth = Math.min(NEAR_W_CAP, Math.max(3, (5 + swing * 3) * tip.k));
     ctx.lineCap = "round";
     ctx.beginPath();
     ctx.moveTo(grip.sx, grip.sy);
@@ -700,12 +919,27 @@
     ctx.stroke();
 
     // Blade flares as it comes through the middle.
-    ctx.lineWidth = Math.max(4, (7 + swing * 6) * tip.k);
+    ctx.lineWidth = Math.min(NEAR_W_CAP, Math.max(4, (7 + swing * 6) * tip.k));
     ctx.strokeStyle = hot ? "#ff9a40" : "#111820";
     ctx.beginPath();
     ctx.moveTo(tip.sx, tip.sy);
     ctx.lineTo(bladeEnd.sx, bladeEnd.sy);
     ctx.stroke();
+
+    // Scrape sparks where a braced blade skids off the shell.
+    if (obs.ok && slip > 0 && slip < 0.7) {
+      ctx.strokeStyle = `rgba(255,220,150,${0.5 * (1 - slip)})`;
+      ctx.lineWidth = Math.max(1.5, 2 * tip.k);
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + slip * 6;
+        const r = (6 + slip * 22) * tip.k;
+        ctx.beginPath();
+        ctx.moveTo(tip.sx, tip.sy);
+        ctx.lineTo(tip.sx + Math.cos(a) * r, tip.sy + Math.sin(a) * r * 0.6);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
 
     // Motion streaks when the swing is live.
     if (swing > 0.35 && !obs.resolved) {
@@ -726,36 +960,51 @@
     }
   }
 
+  // Frontal obstacle: a stick laid across the lane, blade turned at one end.
   function drawCross(obs) {
     const p = strikeProgress(obs);
     const dive = p * p * (3 - 2 * p);
-    // Starts high, then drops into the strike plane.
-    const lift = (1 - dive) * 70;
+    const slip = slipProgress(obs);
+    // Drops in from above the slit, then sinks under the eye once you hop it.
+    const lift = (1 - dive) * 150 - (obs.ok ? slip * 130 : 0);
     const z = obs.z - dive * 20;
-    const half = CORRIDOR.halfW - 24;
+    const f = obs.flip;
+    const half = CORRIDOR.halfW - 18;
 
     drawShadow(0, z, 40 + dive * 120, 0.45);
 
-    const left = projectHeight(-half, z, lift);
-    const right = projectHeight(half, z, lift);
-    const leftBase = project(-half, z);
-    const rightBase = project(half, z);
-    if (!left || !right || !leftBase || !rightBase) return;
+    const gripEnd = projectHeight(-half * f, z + 10, lift + 16);
+    const heel = projectHeight(half * f * 0.82, z, lift);
+    const toe = projectHeight(half * f + f * 14, z - 26, lift - 10);
+    if (!gripEnd || !heel || !toe) return;
 
     const hot = obs.windowOpen && !obs.resolved;
-    const barH = Math.max(4, (10 + dive * 10) * leftBase.k);
-    ctx.fillStyle = hot ? "rgba(255,106,0,0.55)" : "rgba(20,20,30,0.8)";
-    ctx.strokeStyle = hot ? "#ff7a18" : "#222";
-    ctx.lineWidth = Math.max(3, 6 * leftBase.k);
+    ctx.save();
+    ctx.globalAlpha = passAlpha(slip, heel.d);
+    ctx.lineCap = "round";
 
+    // Shaft across the lane.
+    ctx.strokeStyle = hot ? "#ff7a18" : "#1a2030";
+    ctx.lineWidth = Math.min(NEAR_W_CAP, Math.max(3, (6 + dive * 3) * heel.k));
     ctx.beginPath();
-    ctx.moveTo(left.sx, left.sy);
-    ctx.lineTo(right.sx, right.sy);
-    ctx.lineTo(rightBase.sx, rightBase.sy + barH * 0.2);
-    ctx.lineTo(leftBase.sx, leftBase.sy + barH * 0.2);
-    ctx.closePath();
-    ctx.fill();
+    ctx.moveTo(gripEnd.sx, gripEnd.sy);
+    ctx.lineTo(heel.sx, heel.sy);
     ctx.stroke();
+
+    // Blade angled toward us.
+    ctx.strokeStyle = hot ? "#ff9a40" : "#111820";
+    ctx.lineWidth = Math.min(NEAR_W_CAP, Math.max(4, (8 + dive * 6) * heel.k));
+    ctx.beginPath();
+    ctx.moveTo(heel.sx, heel.sy);
+    ctx.lineTo(toe.sx, toe.sy);
+    ctx.stroke();
+
+    // Grip knob so the far end reads as a stick, not a bar.
+    ctx.fillStyle = hot ? "#ffb26b" : "#232b3a";
+    ctx.beginPath();
+    ctx.arc(gripEnd.sx, gripEnd.sy, Math.max(2.5, 5 * gripEnd.k), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
   function drawParticles() {
@@ -770,70 +1019,147 @@
     }
   }
 
-  function drawVignette() {
-    const g = ctx.createRadialGradient(W / 2, H * 0.55, H * 0.15, W / 2, H * 0.55, H * 0.9);
-    g.addColorStop(0, "rgba(0,0,0,0)");
-    g.addColorStop(1, "rgba(0,0,0,0.5)");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
-  }
-
-  function drawPuckRim() {
-    // Sit above the HUD / touch buttons so the rim stays readable.
-    const lean = braceLean + Math.sin(performance.now() / 40) * wobble * 8;
-    const cy = document.body.classList.contains("touch-ui") ? H - 196 : H - 118;
-    const rx = 58;
-    const ry = 14;
-
-    ctx.fillStyle = "rgba(8, 12, 18, 0.92)";
-    ctx.beginPath();
-    ctx.ellipse(W / 2 + lean, cy, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = mom < 0.2
-      ? "rgba(255,90,70,0.95)"
-      : "rgba(160,245,255,0.85)";
-    ctx.lineWidth = 3.5;
-    ctx.stroke();
-
-    // Inner ring for a clearer "puck edge" read.
-    ctx.strokeStyle = "rgba(255,255,255,0.22)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.ellipse(W / 2 + lean, cy, rx - 10, ry - 3, 0, 0, Math.PI * 2);
-    ctx.stroke();
-
-    const spinPhase = performance.now() / 1000 * (puck.vz * 0.02);
-    ctx.strokeStyle = "rgba(220,250,255,0.75)";
-    ctx.lineWidth = 2.5;
-    for (let i = 0; i < 6; i++) {
-      const a = spinPhase + (i / 6) * Math.PI * 2;
-      const px = W / 2 + lean + Math.cos(a) * (rx - 8);
-      const py = cy + Math.sin(a) * (ry - 2);
+  // Radial streaks from the vanishing point — the shove of a clean brace.
+  function drawSpeedStreaks() {
+    if (boostFx <= 0.02) return;
+    const cx = W / 2;
+    const cy = H * CAM.horizonFrac;
+    const a = boostFx;
+    ctx.strokeStyle = `rgba(225,248,255,${0.4 * a})`;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 20; i++) {
+      const ang = (i / 20) * Math.PI * 2 + (i % 3) * 0.35;
+      const r0 = 70 + (1 - a) * 220;
+      const r1 = r0 + 60 + 120 * a;
       ctx.beginPath();
-      ctx.moveTo(px, py - 4);
-      ctx.lineTo(px, py + 4);
+      ctx.moveTo(cx + Math.cos(ang) * r0, cy + Math.sin(ang) * r0 * 0.55);
+      ctx.lineTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1 * 0.55);
       ctx.stroke();
     }
+  }
+
+  function drawHitFlash(slit) {
+    if (hitFlash <= 0.01) return;
+    const a = hitFlash * hitFlash;
+    const bottom = slit.y + slit.h;
+    const tint = (alpha) => hitFlashPerfect
+      ? `rgba(140,255,200,${alpha})`
+      : `rgba(140,210,255,${alpha})`;
+
+    // Light bleeds in from both letterbox edges — glow, not a lit frame.
+    const band = Math.min(120, slit.h * 0.34);
+    const topG = ctx.createLinearGradient(0, slit.y, 0, slit.y + band);
+    topG.addColorStop(0, tint(0.5 * a));
+    topG.addColorStop(1, tint(0));
+    ctx.fillStyle = topG;
+    ctx.fillRect(0, slit.y, W, band);
+
+    const botG = ctx.createLinearGradient(0, bottom - band, 0, bottom);
+    botG.addColorStop(0, tint(0));
+    botG.addColorStop(1, tint(0.5 * a));
+    ctx.fillStyle = botG;
+    ctx.fillRect(0, bottom - band, W, band);
+  }
+
+  function drawSlitBody(slit) {
+    // Letterbox: solid shell above and below, no rim anywhere.
+    const bottom = slit.y + slit.h;
+    ctx.fillStyle = "#05080e";
+    ctx.fillRect(0, 0, W, slit.y);
+    ctx.fillRect(0, bottom, W, H - bottom);
+
+    // Cinematic falloff — the shell dissolves into the view instead of framing it.
+    const topFade = Math.min(90, slit.h * 0.28);
+    const topG = ctx.createLinearGradient(0, slit.y, 0, slit.y + topFade);
+    topG.addColorStop(0, "rgba(5,8,14,0.96)");
+    topG.addColorStop(0.35, "rgba(5,8,14,0.5)");
+    topG.addColorStop(1, "rgba(5,8,14,0)");
+    ctx.fillStyle = topG;
+    ctx.fillRect(0, slit.y, W, topFade);
+
+    const botFade = Math.min(130, slit.h * 0.34);
+    const botG = ctx.createLinearGradient(0, bottom - botFade, 0, bottom);
+    botG.addColorStop(0, "rgba(5,8,14,0)");
+    botG.addColorStop(0.5, "rgba(5,8,14,0.34)");
+    botG.addColorStop(1, "rgba(5,8,14,0.97)");
+    ctx.fillStyle = botG;
+    ctx.fillRect(0, bottom - botFade, W, botFade);
+
+    // Low inertia bleeds red up from the lower edge instead of lighting a frame.
+    if (mom < 0.2) {
+      const a = 0.1 + (1 - mom / 0.2) * 0.28;
+      const warnH = Math.min(110, slit.h * 0.3);
+      const warnG = ctx.createLinearGradient(0, bottom - warnH, 0, bottom);
+      warnG.addColorStop(0, "rgba(255,70,50,0)");
+      warnG.addColorStop(1, `rgba(255,70,50,${a})`);
+      ctx.fillStyle = warnG;
+      ctx.fillRect(0, bottom - warnH, W, warnH);
+    }
+  }
+
+  function drawDamageFlash(slit) {
+    if (damageFlash <= 0) return;
+    const a = damageFlash * 0.45;
+    const g = ctx.createRadialGradient(
+      slit.x + slit.w / 2,
+      slit.y + slit.h / 2,
+      slit.h * 0.1,
+      slit.x + slit.w / 2,
+      slit.y + slit.h / 2,
+      slit.w * 0.55
+    );
+    g.addColorStop(0, `rgba(255,40,30,${a * 0.15})`);
+    g.addColorStop(0.55, `rgba(180,20,20,${a * 0.35})`);
+    g.addColorStop(1, `rgba(80,0,0,${a})`);
+    slitPath(slit);
+    ctx.fillStyle = g;
+    ctx.fill();
+  }
+
+  // Looking from inside the puck: leaning and trembling move the view, not a disc.
+  function worldJitter() {
+    const t = performance.now() / 1000;
+    let jx = -braceLean * 0.5 + Math.sin(t * 25) * wobble * 4;
+    let jy = 0;
+    let roll = tilt;
+
+    if (tremble > 0) {
+      const e = tremble * tremble;
+      jx += (Math.sin(t * 61) + Math.sin(t * 97) * 0.5) * 7 * e;
+      jy += (Math.cos(t * 73) + Math.sin(t * 113) * 0.5) * 5 * e;
+      roll += Math.sin(t * 44) * 0.03 * e;
+    }
+    return { jx, jy, roll };
   }
 
   function render() {
     ctx.clearRect(0, 0, W, H);
 
+    // Shell fill behind everything.
+    ctx.fillStyle = "#05080e";
+    ctx.fillRect(0, 0, W, H);
+
+    const slit = slitRect();
+    const { jx, jy, roll } = worldJitter();
+
+    // World lives inside the band; the letterbox stays still.
     ctx.save();
-    const sx = (Math.random() - 0.5) * shake * 18;
-    const sy = (Math.random() - 0.5) * shake * 10;
-    ctx.translate(W / 2 + sx, H / 2 + sy);
-    ctx.rotate(tilt);
+    slitPath(slit);
+    ctx.clip();
+
+    ctx.save();
+    ctx.translate(W / 2 + jx, H / 2 + jy);
+    ctx.rotate(roll);
     ctx.translate(-W / 2, -H / 2);
 
-    drawCeiling();
+    drawArenaStrip();
     drawFloor();
-    drawWalls();
+    drawLane();
     drawGoal();
 
+    // Resolved sticks stay in frame so they visibly slide past, not blink out.
     const sorted = [...obstacles]
-      .filter((o) => !o.resolved && o.z > puck.z - 30)
+      .filter((o) => o.z > puck.z - 30 && slipProgress(o) < 1)
       .sort((a, b) => b.z - a.z);
 
     for (const obs of sorted) {
@@ -842,10 +1168,13 @@
     }
 
     drawParticles();
-    drawVignette();
-    drawPuckRim();
-
+    drawSpeedStreaks();
     ctx.restore();
+    ctx.restore();
+
+    drawSlitBody(slit);
+    drawHitFlash(slit);
+    drawDamageFlash(slit);
   }
 
   function loop(ts) {
@@ -863,7 +1192,11 @@
       if (code === "brace") startRun();
       return;
     }
-    if (phase !== "play") return;
+    if (phase !== "play") {
+      // Between rounds the same button confirms the report.
+      if (code === "brace") runContinue();
+      return;
+    }
     pendingInputs.push(code);
   }
 
@@ -901,9 +1234,12 @@
   }
 
   restartBtn.addEventListener("click", () => {
+    if (pendingContinue) {
+      runContinue();
+      return;
+    }
     introEl.hidden = true;
     resetRun({ keepLives: false, keepStreak: false, keepGoals: false });
-    phase = "play";
   });
   startBtn.addEventListener("click", startRun);
   window.addEventListener("resize", resize);
