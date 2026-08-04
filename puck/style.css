@@ -126,6 +126,20 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.18);
 }
 
+/* Half mark: below it, one more mistake ends the attempt. */
+.grip-tick {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(2, 6, 12, 0.6);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+  z-index: 2;
+  pointer-events: none;
+}
+
 .grip-fill {
   height: 100%;
   width: 100%;
@@ -315,6 +329,13 @@ body {
   font-weight: 700;
 }
 
+.report-note {
+  margin-top: 12px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: rgba(255, 179, 128, 0.9);
+}
+
 #restart-btn {
   pointer-events: auto;
   position: absolute;
@@ -333,6 +354,91 @@ body {
 
 #restart-btn:hover {
   background: #fff;
+}
+
+/* Tutorial card sits in the upper letterbox so the incoming stick stays visible. */
+#tutor {
+  pointer-events: auto;
+  position: absolute;
+  left: 50%;
+  top: 9%;
+  transform: translateX(-50%);
+  width: min(540px, calc(100% - 32px));
+  padding: 16px 20px 14px;
+  border-radius: 14px;
+  background: rgba(6, 14, 28, 0.95);
+  border: 1px solid rgba(120, 200, 255, 0.4);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+  text-align: left;
+}
+
+#tutor[hidden] {
+  display: none;
+}
+
+.tutor-step {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: rgba(120, 200, 255, 0.85);
+}
+
+.tutor-text {
+  margin-top: 8px;
+  font-size: 15px;
+  line-height: 1.45;
+  color: rgba(232, 244, 255, 0.9);
+}
+
+.tutor-text b {
+  color: #fff;
+  background: rgba(120, 200, 255, 0.18);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+
+.tutor-actions {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+#tutor-next {
+  padding: 9px 20px;
+  border: none;
+  border-radius: 8px;
+  background: #e8f4ff;
+  color: #0a1628;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#tutor-next:hover {
+  background: #fff;
+}
+
+.ghost-btn {
+  pointer-events: auto;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(232, 244, 255, 0.55);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.ghost-btn:hover {
+  color: #e8f4ff;
+}
+
+.ghost-btn[hidden] {
+  display: none;
 }
 
 #intro[hidden] {
@@ -428,6 +534,8 @@ body {
 }
 
 @media (max-width: 640px) {
+  #tutor { top: 7%; padding: 13px 15px 12px; }
+  .tutor-text { font-size: 13.5px; }
   .hud-box { font-size: 12px; min-width: 90px; padding: 6px 10px; }
   .controls-hint { gap: 14px; font-size: 11px; }
   #brace-flash { font-size: 18px; }

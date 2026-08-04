@@ -27,6 +27,7 @@
         <div class="grip-bar">
           <div class="grip-danger"></div>
           <div class="grip-fill" id="grip-fill"></div>
+          <div class="grip-tick" title="Одна ошибка"></div>
         </div>
         <div class="grip-value" id="grip-value">55</div>
       </div>
@@ -55,16 +56,27 @@
     <div id="status" hidden></div>
     <button id="restart-btn" type="button" hidden>Ещё раз</button>
 
+    <div id="tutor" hidden>
+      <div class="tutor-step" id="tutor-step"></div>
+      <div class="tutor-text" id="tutor-text"></div>
+      <div class="tutor-actions">
+        <button id="tutor-next" type="button">Понятно</button>
+        <button id="tutor-skip" type="button" class="ghost-btn">Пропустить обучение</button>
+      </div>
+    </div>
+
     <div id="intro">
       <h1>Ты — шайба</h1>
-      <p class="intro-sub">Ты смотришь изнутри шайбы. Инерция всегда тает — единственный способ ехать дальше: вовремя принять удар.</p>
+      <p class="intro-sub">Ты смотришь изнутри шайбы и стартуешь на полной скорости. Инерция — запас ошибок: две ошибки, и попытка кончена.</p>
       <ol class="intro-list">
-        <li>Клюшка слева — <b>A</b>, справа — <b>D</b>, клюшка поперёк — <b>SPACE</b> (перелетаешь её). Попал — удар даёт скорость.</li>
+        <li>Клюшка слева — <b>A</b>, справа — <b>D</b>, клюшка поперёк — <b>SPACE</b> (перелетаешь её). Точный приём возвращает инерцию.</li>
+        <li>Любая ошибка снимает <b>половину</b> полосы инерции. Метка на полосе — рубеж: ниже неё осталась одна ошибка.</li>
         <li><b>Жизни</b> — сколько раз можно не долететь до ворот. Недолёт снимает сердце.</li>
         <li><b>Серия</b> — сколько голов забил на текущих трёх жизнях. Три недолёта — серия сбрасывается.</li>
-        <li>Доедь до ворот в конце тоннеля. После каждой атаки — отчёт, дальше по кнопке или <b>SPACE</b>.</li>
+        <li>Доедь до ворот. Каждая следующая попытка чуть сложнее: клюшек больше, окно уже.</li>
       </ol>
       <button id="start-btn" type="button">Поехали</button>
+      <button id="tutor-again" type="button" class="ghost-btn" hidden>Пройти обучение заново</button>
     </div>
   </div>
 
