@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Шайба: свои и чужие</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud">
+    <div class="hud-top">
+      <div class="hud-box" id="lives-box">ЖИЗНИ <span id="lives">♥♥♥</span></div>
+      <div class="hud-center">
+        <div class="progress-label">ДО ВОРОТ</div>
+        <div class="progress-wrap">
+          <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        </div>
+      </div>
+      <div class="hud-box" id="streak-box">СЕРИЯ <span id="streak">0</span></div>
+    </div>
+
+    <div class="hud-bottom">
+      <div class="grip-wrap">
+        <div class="grip-label">ИНЕРЦИЯ</div>
+        <div class="grip-bar">
+          <div class="grip-danger"></div>
+          <div class="grip-fill" id="grip-fill"></div>
+          <div class="grip-tick" title="Одна ошибка"></div>
+        </div>
+        <div class="grip-value" id="grip-value">55</div>
+      </div>
+      <div class="stick-legend">
+        <span class="legend-item legend-team"><i></i>СВОЯ — ПОД НЕЁ</span>
+        <span class="legend-item legend-foe"><i></i>ЧУЖАЯ — В ДРУГУЮ</span>
+      </div>
+      <div class="controls-hint">
+        <span>A ВЛЕВО</span>
+        <span>SPACE ПРЫЖОК</span>
+        <span>D ВПРАВО</span>
+      </div>
+      <div id="touch-controls">
+        <button type="button" class="touch-btn" data-input="left" aria-label="Влево">
+          <span class="touch-key">◀</span>
+          <span class="touch-label">ВЛЕВО</span>
+        </button>
+        <button type="button" class="touch-btn touch-btn-center" data-input="brace" aria-label="Прыжок">
+          <span class="touch-key">●</span>
+          <span class="touch-label">ПРЫЖОК</span>
+        </button>
+        <button type="button" class="touch-btn" data-input="right" aria-label="Вправо">
+          <span class="touch-key">▶</span>
+          <span class="touch-label">ВПРАВО</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="brace-flash" hidden></div>
+    <div id="status" hidden></div>
+    <button id="restart-btn" type="button" hidden>Ещё раз</button>
+
+    <div id="tutor" hidden>
+      <div class="tutor-step" id="tutor-step"></div>
+      <div class="tutor-text" id="tutor-text"></div>
+      <div class="tutor-actions">
+        <button id="tutor-next" type="button">Понятно</button>
+        <button id="tutor-skip" type="button" class="ghost-btn">Пропустить обучение</button>
+      </div>
+    </div>
+
+    <div id="intro">
+      <h1>Свои и чужие</h1>
+      <p class="intro-sub">Ты смотришь изнутри шайбы и стартуешь на полной скорости. По цвету клюшки решай: подставиться или уйти. Инерция — запас ошибок: две ошибки, и попытка кончена.</p>
+      <ol class="intro-list">
+        <li><b class="ink-team">Синяя клюшка — своя</b>: это пас. Подставься <b>той же</b> стороной: слева — <b>A</b>, справа — <b>D</b>. Точный приём разгоняет сильнее всего — скорость берётся отсюда.</li>
+        <li><b class="ink-foe">Красная клюшка — чужая</b>: отбирают шайбу. Уходи в <b>другую</b> сторону: клюшка слева — <b>D</b>, справа — <b>A</b>. Уворот спасает, но скорости почти не даёт.</li>
+        <li>Поперёк дорожки бывают только <b class="ink-foe">чужие</b> — их перепрыгиваешь: <b>SPACE</b>.</li>
+        <li>Любая ошибка снимает <b>половину</b> полосы инерции. Метка на полосе — рубеж: ниже неё осталась одна ошибка.</li>
+        <li><b>Жизни</b> — сколько раз можно не долететь до ворот. <b>Серия</b> — голы на текущих трёх жизнях. Каждая попытка чуть сложнее: чужих больше, окно уже.</li>
+      </ol>
+      <button id="start-btn" type="button">Поехали</button>
+      <button id="tutor-again" type="button" class="ghost-btn" hidden>Пройти обучение заново</button>
+    </div>
+  </div>
+
+  <a class="back-link" href="../">← К играм</a>
+  <script src="game.js"></script>
+</body>
+</html>
