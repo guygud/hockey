@@ -47,9 +47,10 @@
   const FOE_SHARE = 0.45;
   const FOE_RAMP = 0.3;
   const HIT_LINE = 110;
-  const WINDOW_OPEN = 0.9;
-  const PERFECT = 0.08;
-  const GOOD = 0.2;
+  // Shared by side sticks and frontal crosses — same clock, same windows.
+  const WINDOW_OPEN = 1.05;
+  const PERFECT = 0.14;
+  const GOOD = 0.32;
   const INTERVAL_START = 1.6;
   const INTERVAL_END = 1.05;
   // Every attempt in the same life bank ramps up, then plateaus at MAX_LEVEL.
@@ -57,19 +58,25 @@
   const DRAIN_RAMP = 0.55;
   const GAP_RAMP = 0.3;
   const WINDOW_RAMP = 0.22;
-  // Hints coach this many sticks, and light up this long before contact.
-  const TUTOR_LESSONS = 5;
+  // Scripted onboarding: long track, slow pace, wide windows, then a 6-stick exam.
+  const TUTOR_DIST = 8000;
   const TUTOR_CUE_LEAD = 1.9;
   const TUTOR_WIN_MUL = 1.9;
-  // School pace: slow enough to read a colour, and it fits every lesson on the
-  // track. Speed snaps back to the bar the moment the lesson is over.
   const TUTOR_SPEED = 300;
+  const TUTOR_PRACTICE_GAP = 2.8;
+  const TUTOR_PASS = 5;
+  const TUTOR_SPAWN_LEAD = 2.4;
   const GRADE_FLASH_TIME = 0.55;
   const TREMBLE_DECAY = 1.7;
   // How far past the hit line a resolved stick keeps sliding by.
   const SLIP_SPAN = 160;
   const NEAR_W_CAP = 56;
   const CONFIRM_DELAY = 450;
+  // Brief look glance on press — view only, puck keeps skating straight.
+  const GLANCE_X = 20;
+  const GLANCE_ROLL = 0.034;
+  const GLANCE_Y = 12;
+  const GLANCE_DECAY = 11;
 
   let W = 0;
   let H = 0;
@@ -91,6 +98,9 @@
   let runDist;
   let tilt;
   let braceLean;
+  let glanceX;
+  let glanceY;
+  let glanceRoll;
   let wobble;
   let camBoost;
   let camBoostVel;
@@ -114,10 +124,23 @@
   let pendingContinue = null;
   let confirmAt = 0;
   let tutorOn = false;
-  let tutorSpawns = 0;
+  let tutorStage = 0;
+  let tutorTimer = 0;
+  let tutorMode = "off"; // off | script | practice
+  let tutorPause = null; // { mode, title, body, pointGrip?, obs? }
+  let tutorActObs = null;
+  let tutorWatchObs = null;
+  let tutorPracticeIdx = 0;
   let tutorTaught = 0;
   let tutorOk = 0;
   let pendingAlt = null;
+
+  const tutorEl = document.getElementById("tutor");
+  const tutorTitleEl = document.getElementById("tutor-title");
+  const tutorBodyEl = document.getElementById("tutor-body");
+  const tutorHintEl = document.getElementById("tutor-hint");
+  const tutorCardEl = tutorEl ? tutorEl.querySelector(".tutor-card") : null;
+  const gripBarEl = document.querySelector(".grip-bar");
 
   // ---------- AUDIO ----------
 
@@ -213,10 +236,21 @@
     return { x: 0, z: 40, vz: speedFor(MOM_START) };
   }
 
+  // 1 on the first attempt, ~0.7 on the second, then off. Softens the onboarding
+  // runs hard so the player learns colours before the real pacing kicks in.
+  function earlyEase() {
+    if (level <= 0) return 1;
+    if (level <= 1) return 0.7;
+    return 0;
+  }
+
   function pickSide() {
+    const ease = earlyEase();
+    // Almost no frontal sticks on L0, few on L1 — side passes/dodges first.
+    const frontal = 0.2 * (1 - 0.9 * ease);
     const r = Math.random();
-    if (r < 0.4) return -1;
-    if (r < 0.8) return 1;
+    if (r < (1 - frontal) * 0.5) return -1;
+    if (r < 1 - frontal) return 1;
     return 0;
   }
 
@@ -224,34 +258,74 @@
   // and the foe share grows with the difficulty level.
   function pickFoe(side) {
     if (side === 0) return true;
-    return Math.random() < FOE_SHARE + FOE_RAMP * levelMix();
+    const share = (FOE_SHARE + FOE_RAMP * levelMix()) * (1 - 0.85 * earlyEase());
+    return Math.random() < share;
   }
 
-  // While teaching, walk through the three answers in order, then repeat the two
-  // side cases so the colour rule gets a second pass.
-  // The three answers, then the two colour cases again. Nothing here costs
-  // inertia: the price of fumbling a lesson is repeating the lesson.
-  const TUTOR_ORDER = [
+  // Practice exam after the scripted lesson: two of each answer, generous gaps.
+  const TUTOR_PRACTICE = [
     { side: null, foe: false },
     { side: null, foe: true },
     { side: 0, foe: true },
-    { side: null, foe: true },
     { side: null, foe: false },
+    { side: null, foe: true },
+    { side: 0, foe: true },
+  ];
+
+  // Step kinds: say (pause + any key), spawn, watch (demo collision), act
+  // (freeze at perfect timing + required key), practice (free play exam).
+  const TUTOR_SCRIPT = [
+    {
+      kind: "say",
+      delay: 0.8,
+      title: "ИНЕРЦИЯ",
+      body: "Чтобы докатиться до ворот, скорость не должна падать до нуля. Следи за полосой внизу.",
+      pointGrip: true,
+    },
+    { kind: "spawn", side: null, foe: true, demo: true },
+    {
+      kind: "say",
+      title: "ЧУЖАЯ КЛЮШКА",
+      body: "Если просто ударишься о клюшку — потеряешь скорость.",
+      revealT: 1.55,
+    },
+    { kind: "watch" },
+    { kind: "spawn", side: null, foe: false },
+    {
+      kind: "say",
+      title: "СВОЯ КЛЮШКА",
+      body: "Чтобы набрать скорость, бейся о клюшки своей команды.",
+      revealT: 1.55,
+    },
+    {
+      kind: "act",
+      title: "ИДЕАЛЬНЫЙ ОТСКОК",
+      body: "Жди вспышку блика на льду — потом жми в сторону своей клюшки.",
+    },
+    { kind: "spawn", side: 0, foe: true },
+    {
+      kind: "act",
+      title: "ПРЫЖОК",
+      body: "На вспышке блика — прыжок.",
+    },
+    { kind: "spawn", side: null, foe: true },
+    {
+      kind: "act",
+      title: "УВОРОТ",
+      body: "На вспышке блика — уходи в другую сторону.",
+    },
+    {
+      kind: "say",
+      title: "ТЕПЕРЬ САМ",
+      body: "Дальше без пауз. Две свои, две чужие сбоку и две поперёк — с запасом времени.",
+      refill: true,
+    },
+    { kind: "practice" },
   ];
 
   function nextSpawn() {
-    if (!tutorOn) {
-      const side = pickSide();
-      return { side, foe: pickFoe(side) };
-    }
-    const step = TUTOR_ORDER[tutorSpawns];
-    tutorSpawns += 1;
-    if (!step) {
-      const side = pickSide();
-      return { side, foe: pickFoe(side) };
-    }
-    const side = step.side === null ? (Math.random() < 0.5 ? -1 : 1) : step.side;
-    return { side, foe: step.foe, lesson: true, free: true };
+    const side = pickSide();
+    return { side, foe: pickFoe(side) };
   }
 
   // What the player must press: take a team pass on its own side, swerve away
@@ -271,9 +345,12 @@
       type: side === 0 ? "cross" : "stick",
       resolved: false,
       ok: false,
-      // lesson: shows the hint zone. free: a fumble here costs no inertia.
+      // lesson: brighter ice glow. free: fumble costs no inertia.
+      // demo: auto-collision, inputs ignored. practice: counts toward the exam.
       lesson: !!opts.lesson,
       free: !!opts.free,
+      demo: !!opts.demo,
+      practice: !!opts.practice,
       flip: Math.random() < 0.5 ? -1 : 1,
       answer: null,
       windowOpen: false,
@@ -286,15 +363,18 @@
   }
 
   function drainRate() {
-    return MOM_DRAIN * (1 + DRAIN_RAMP * levelMix());
+    // Scripted lesson freezes the bar so the demo hit is the only visible drop.
+    if (tutorOn && tutorMode !== "practice") return 0;
+    const ease = earlyEase();
+    return MOM_DRAIN * (1 + DRAIN_RAMP * levelMix()) * (1 - 0.8 * ease);
   }
 
   function perfectWin() {
-    return PERFECT * (1 - WINDOW_RAMP * levelMix());
+    return PERFECT * (1 - WINDOW_RAMP * levelMix()) * (1 + 1.35 * earlyEase());
   }
 
   function goodWin() {
-    return GOOD * (1 - WINDOW_RAMP * levelMix());
+    return GOOD * (1 - WINDOW_RAMP * levelMix()) * (1 + 1.15 * earlyEase());
   }
 
   // A coached stick is forgiving: the same rules, just a wider moment to hit.
@@ -302,15 +382,96 @@
     return obs && obs.lesson ? TUTOR_WIN_MUL : 1;
   }
 
+  // Shared timing model for input grading and the ice-glow under a stick.
+  function timingBounds(obs) {
+    const mul = winMul(obs);
+    const ease = earlyEase();
+    return {
+      open: WINDOW_OPEN * (1 + 0.45 * ease),
+      perfect: perfectWin() * mul,
+      good: goodWin() * mul,
+    };
+  }
+
+  // phase: approach (good window ahead), perfect, late, or null if out of range.
+  // intensity 0..1 peaks at the centre of the current phase.
+  function timingPhase(obs) {
+    const t = timeToHit(obs);
+    const b = timingBounds(obs);
+    if (t > b.open || t < -b.good) {
+      return { phase: null, t, intensity: 0, bounds: b };
+    }
+    if (Math.abs(t) <= b.perfect) {
+      return {
+        phase: "perfect",
+        t,
+        intensity: 1 - Math.abs(t) / Math.max(b.perfect, 0.001),
+        bounds: b,
+      };
+    }
+    if (t > 0) {
+      // From first visible approach down to the perfect rim.
+      const span = Math.max(b.open - b.perfect, 0.001);
+      const intensity = Math.max(0, Math.min(1, 1 - (t - b.perfect) / span));
+      return { phase: "approach", t, intensity, bounds: b };
+    }
+    // Past the perfect rim, still inside the good window — late.
+    const span = Math.max(b.good - b.perfect, 0.001);
+    const intensity = Math.max(0, Math.min(1, 1 - (-t - b.perfect) / span));
+    return { phase: "late", t, intensity, bounds: b };
+  }
+
   function spawnInterval() {
-    // Lessons arrive with room to read the colour before choosing a side.
-    if (tutorOn && tutorSpawns < TUTOR_LESSONS) return tutorSpawns === 0 ? 2.6 : 2.1;
+    if (tutorOn && tutorMode === "practice") return TUTOR_PRACTICE_GAP;
     const t = Math.max(0, Math.min(1, puck.z / runDist));
     const base = INTERVAL_START + (INTERVAL_END - INTERVAL_START) * t;
-    return base * (1 - GAP_RAMP * levelMix());
+    return base * (1 - GAP_RAMP * levelMix()) * (1 + 1.1 * earlyEase());
+  }
+
+  function resolveSpawnSide(side) {
+    if (side === null || side === undefined) return Math.random() < 0.5 ? -1 : 1;
+    return side;
+  }
+
+  function tutorSpawnStick(spec) {
+    const lead = Math.max(puck.vz, SPEED_MIN) * TUTOR_SPAWN_LEAD;
+    const nextZ = Math.max(lastSpawnZ + 120, puck.z + lead);
+    const side = resolveSpawnSide(spec.side);
+    const obs = makeObstacle(nextZ, side, !!spec.foe, {
+      lesson: !spec.practice,
+      free: !!spec.practice,
+      demo: !!spec.demo,
+      practice: !!spec.practice,
+    });
+    obstacles.push(obs);
+    lastSpawnZ = nextZ;
+    return obs;
+  }
+
+  function maybeSpawnPractice() {
+    if (tutorPracticeIdx >= TUTOR_PRACTICE.length) return;
+    if (obstacles.some((o) => !o.resolved && o.z > puck.z - 40)) return;
+    const lead = Math.max(puck.vz, SPEED_MIN) * TUTOR_PRACTICE_GAP;
+    const nextZ = Math.max(lastSpawnZ + 120, puck.z + lead);
+    const spec = TUTOR_PRACTICE[tutorPracticeIdx];
+    obstacles.push(
+      makeObstacle(nextZ, resolveSpawnSide(spec.side), !!spec.foe, {
+        lesson: false,
+        free: true,
+        practice: true,
+      })
+    );
+    lastSpawnZ = nextZ;
+    tutorPracticeIdx += 1;
   }
 
   function maybeSpawnObstacles() {
+    // Tutorial owns its own spawns — no random sticks and no final goalie bar.
+    if (tutorOn) {
+      if (tutorMode === "practice") maybeSpawnPractice();
+      return;
+    }
+
     // One strike at a time — no corridor full of parked sticks.
     if (obstacles.some((o) => !o.resolved && o.z > puck.z - 40)) return;
     if (finalSpawned) return;
@@ -330,9 +491,7 @@
     }
 
     const spawn = nextSpawn();
-    obstacles.push(
-      makeObstacle(nextZ, spawn.side, spawn.foe, { lesson: spawn.lesson, free: spawn.free })
-    );
+    obstacles.push(makeObstacle(nextZ, spawn.side, spawn.foe));
     lastSpawnZ = nextZ;
   }
 
@@ -354,7 +513,7 @@
       level = 0;
     }
 
-    runDist = RUN_DIST;
+    runDist = tutorOn ? TUTOR_DIST : RUN_DIST;
     mom = MOM_START;
     if (!keepStreak) streak = 0;
     if (!keepLives) lives = MAX_LIVES;
@@ -363,6 +522,9 @@
     particles = [];
     tilt = 0;
     braceLean = 0;
+    glanceX = 0;
+    glanceY = 0;
+    glanceRoll = 0;
     wobble = 0;
     camBoost = 0;
     camBoostVel = 0;
@@ -376,7 +538,13 @@
     hitFlashPerfect = false;
     boostFx = 0;
     runStats = { perfect: 0, good: 0, wrong: 0, missed: 0, passes: 0, dodges: 0 };
-    tutorSpawns = 0;
+    tutorStage = 0;
+    tutorTimer = 0;
+    tutorMode = tutorOn ? "script" : "off";
+    tutorPause = null;
+    tutorActObs = null;
+    tutorWatchObs = null;
+    tutorPracticeIdx = 0;
     tutorTaught = 0;
     tutorOk = 0;
     lastSpawnZ = 280;
@@ -391,6 +559,7 @@
     pendingContinue = null;
     pendingAlt = null;
     tutorHideBtn.hidden = !tutorOn;
+    hideTutorCard();
     statusEl.hidden = true;
     statusEl.className = "";
     restartBtn.hidden = true;
@@ -515,8 +684,15 @@
   }
 
   function speedFor(m) {
-    const v = SPEED_MIN + m * (SPEED_MAX - SPEED_MIN);
-    return tutorOn ? Math.min(v, TUTOR_SPEED) : v;
+    let v = SPEED_MIN + m * (SPEED_MAX - SPEED_MIN);
+    if (tutorOn) v = Math.min(v, TUTOR_SPEED);
+    const ease = earlyEase();
+    if (ease > 0) {
+      // L0 ~340, L1 ~390 — readable pace before the full launch speed.
+      const cap = SPEED_MIN + (SPEED_MAX - SPEED_MIN) * (0.45 + 0.2 * (1 - ease));
+      v = Math.min(v, cap);
+    }
+    return v;
   }
 
   function applyMom(delta) {
@@ -570,7 +746,7 @@
 
     if (dodged) sfxDodge(perfect);
     else sfxHit(perfect);
-    if (obs.lesson) tutorTaughtOne(true);
+    if (obs.practice) tutorTaughtOne(true);
     updateHud();
   }
 
@@ -581,7 +757,9 @@
 
     // Any mistake costs the same half bar — the rule stays readable at speed.
     if (!obs.free) applyMom(-MISS_COST);
-    if (reason === "wrong") {
+    if (obs.demo) {
+      showGrade("УДАР — СКОРОСТЬ ПАДАЕТ", "grade-miss");
+    } else if (reason === "wrong") {
       showGrade(obs.foe ? "ПОЙМАЛИ" : "НЕ ТУДА", "grade-miss");
       runStats.wrong += 1;
     } else {
@@ -598,7 +776,7 @@
     braceLean = obs.side * -12;
     spawnSparks(6);
     sfxFail();
-    if (obs.lesson) tutorTaughtOne(false);
+    if (obs.practice) tutorTaughtOne(false);
     updateHud();
   }
 
@@ -626,6 +804,9 @@
     if (framePresses.length === 0) return;
 
     const obs = activeWindowObs();
+    // Demo stick must land by itself — inputs are ignored until the collision.
+    if (obs && obs.demo) return;
+
     if (!obs) {
       // Whiff outside any window — no life / streak cost, and free while learning.
       if (!tutorOn) applyMom(-0.05);
@@ -647,10 +828,10 @@
     const pressed = framePresses[0];
     const t = timeToHit(obs);
     const absT = Math.abs(t);
-    const mul = winMul(obs);
+    const b = timingBounds(obs);
 
     // Too early with the right move: don't punish it, wait for the window.
-    if (pressed === obs.want && t > goodWin() * mul) {
+    if (pressed === obs.want && t > b.good) {
       showGrade("РАНО", "grade-whiff");
       return;
     }
@@ -662,9 +843,9 @@
     }
 
     obs.answer = pressed;
-    if (absT <= perfectWin() * mul) {
+    if (absT <= b.perfect) {
       resolveSuccess(obs, "perfect");
-    } else if (absT <= goodWin() * mul) {
+    } else if (absT <= b.good) {
       resolveSuccess(obs, "good");
     } else {
       // Past the hit window with the right side — counts as a miss.
@@ -676,9 +857,10 @@
     for (const obs of obstacles) {
       if (obs.resolved) continue;
       const t = timeToHit(obs);
+      const b = timingBounds(obs);
+      const late = -b.good;
 
-      const late = -goodWin() * winMul(obs);
-      if (t < WINDOW_OPEN && t > late) {
+      if (t < b.open && t > late) {
         obs.windowOpen = true;
       }
 
@@ -722,10 +904,34 @@
     }
   }
 
+  function nudgeLook(code) {
+    if (code === "left") {
+      glanceX = -GLANCE_X;
+      glanceY = 0;
+      glanceRoll = -GLANCE_ROLL;
+    } else if (code === "right") {
+      glanceX = GLANCE_X;
+      glanceY = 0;
+      glanceRoll = GLANCE_ROLL;
+    } else {
+      // Jump: a short look up — content shifts down in the frame.
+      glanceX = 0;
+      glanceY = GLANCE_Y;
+      glanceRoll = 0;
+    }
+  }
+
   function updateFx(dt) {
     tilt *= 0.88;
     braceLean *= Math.pow(0.08, dt);
     if (Math.abs(braceLean) < 0.2) braceLean = 0;
+    const glanceFade = Math.exp(-GLANCE_DECAY * dt);
+    glanceX *= glanceFade;
+    glanceY *= glanceFade;
+    glanceRoll *= glanceFade;
+    if (Math.abs(glanceX) < 0.15) glanceX = 0;
+    if (Math.abs(glanceY) < 0.15) glanceY = 0;
+    if (Math.abs(glanceRoll) < 0.0005) glanceRoll = 0;
     wobble = Math.max(0, wobble - dt * 2.5);
 
     // Hop spring: eye lifts over a frontal stick, then settles back down.
@@ -785,6 +991,8 @@
 
   function nextAttemptNote() {
     if (level >= MAX_LEVEL) return "Сложность на максимуме: держись.";
+    if (level <= 0) return "Первые два заезда — учебные: больше своих, шире окно, спокойный темп.";
+    if (level <= 1) return "Ещё один мягкий заезд — дальше темп и чужие клюшки подтянутся.";
     return "Следующая попытка: чужих клюшек больше, окно уже, инерция тает быстрее.";
   }
 
@@ -900,18 +1108,11 @@
     }
   }
 
-  function cueArrow(kind) {
-    if (kind === "left") return "◀";
-    if (kind === "right") return "▶";
-    return "▲";
-  }
-
-  // Which button, spelled out: a key on desktop, the zone itself on a phone.
-  function cueKeyLine(kind) {
-    if (isTouchUi()) return kind === "brace" ? "ТАП ПО ЦЕНТРУ" : "ТАП В ЭТОЙ ЗОНЕ";
-    if (kind === "left") return "КЛАВИША A";
-    if (kind === "right") return "КЛАВИША D";
-    return "КЛАВИША SPACE";
+  // One vocabulary everywhere: A / D / SPACE (arrows and taps still work).
+  function cueKey(kind) {
+    if (kind === "left") return "A";
+    if (kind === "right") return "D";
+    return "SPACE";
   }
 
   function cueWord(kind) {
@@ -925,39 +1126,199 @@
     return obs.foe ? "ЧУЖАЯ — УХОДИ В ДРУГУЮ" : "СВОЯ — ПОДСТАВЬСЯ";
   }
 
-  // The stick the hints are pointing at right now, if it is close enough.
-  function tutorTarget() {
-    let best = null;
-    let bestT = Infinity;
-    for (const obs of obstacles) {
-      if (obs.resolved || !obs.lesson) continue;
-      const t = timeToHit(obs);
-      if (t > TUTOR_CUE_LEAD || t < -goodWin() * winMul(obs)) continue;
-      if (t < bestT) {
-        bestT = t;
-        best = obs;
-      }
+  function hideTutorCard() {
+    if (tutorEl) tutorEl.hidden = true;
+    if (tutorCardEl) tutorCardEl.classList.remove("tutor-card--top");
+    tutorPause = null;
+  }
+
+  function showTutorCard(step, opts = {}) {
+    if (!tutorEl) return;
+    braceFlash.hidden = true;
+    tutorTitleEl.textContent = step.title || "";
+    tutorBodyEl.textContent = step.body || "";
+    if (opts.mode === "act") {
+      tutorHintEl.textContent = "Нажми A, D или SPACE — как на подсказке";
+      if (tutorCardEl) tutorCardEl.classList.add("tutor-card--top");
+    } else {
+      tutorHintEl.textContent = "Нажми любую кнопку (A / D / SPACE)";
+      if (tutorCardEl) tutorCardEl.classList.remove("tutor-card--top");
     }
-    return best;
+    tutorEl.hidden = false;
+  }
+
+  function openTutorSay(step) {
+    tutorPause = {
+      mode: "say",
+      title: step.title,
+      body: step.body,
+      pointGrip: !!step.pointGrip,
+      refill: !!step.refill,
+    };
+    showTutorCard(step, { mode: "say" });
+    pendingInputs.length = 0;
+  }
+
+  function openTutorAct(step, obs) {
+    tutorPause = {
+      mode: "act",
+      title: step.title,
+      body: step.body,
+      obs,
+    };
+    showTutorCard(step, { mode: "act" });
+    pendingInputs.length = 0;
+  }
+
+  function tutorAdvance() {
+    tutorStage += 1;
+    tutorTimer = 0;
+  }
+
+  function dismissTutorSay() {
+    const pause = tutorPause;
+    hideTutorCard();
+    if (pause && pause.refill) {
+      mom = MOM_START;
+      puck.vz = speedFor(mom);
+      updateHud();
+    }
+    tutorAdvance();
+  }
+
+  // True while a coached stick is approaching its freeze point — swallow taps.
+  function tutorSwallowInputs() {
+    if (!tutorOn || tutorMode !== "script" || tutorPause) return false;
+    const step = TUTOR_SCRIPT[tutorStage];
+    if (!step) return false;
+    if (step.kind === "act") return true;
+    if (step.kind === "watch") return true;
+    if (step.kind === "say" && (step.delay || 0) > 0 && tutorTimer < step.delay) return false;
+    return false;
+  }
+
+  function tutorPauseInput() {
+    if (pendingInputs.length === 0) return;
+    const presses = pendingInputs.splice(0, pendingInputs.length);
+    if (!tutorPause) return;
+
+    if (tutorPause.mode === "say") {
+      dismissTutorSay();
+      return;
+    }
+
+    if (tutorPause.mode === "act") {
+      const want = tutorPause.obs && tutorPause.obs.want;
+      if (!want || !presses.includes(want)) return;
+      // Resolve on this frame while t is still frozen in the perfect window,
+      // then advance — otherwise the next say-step would re-pause first.
+      hideTutorCard();
+      pendingInputs.push(want);
+      handleInputs();
+      tutorAdvance();
+    }
+  }
+
+  function tutorScriptTick(dt) {
+    if (!tutorOn || tutorMode !== "script" || tutorPause) return;
+    const step = TUTOR_SCRIPT[tutorStage];
+    if (!step) return;
+
+    if (step.kind === "say") {
+      tutorTimer += dt;
+      if (tutorTimer < (step.delay || 0)) return;
+      // Let the stick roll into view before the card covers it.
+      if (step.revealT != null) {
+        const obs = tutorWatchObs || tutorActObs;
+        if (obs && !obs.resolved && timeToHit(obs) > step.revealT) return;
+      }
+      openTutorSay(step);
+      return;
+    }
+
+    if (step.kind === "spawn") {
+      const obs = tutorSpawnStick(step);
+      if (step.demo) tutorWatchObs = obs;
+      else tutorActObs = obs;
+      tutorAdvance();
+      return;
+    }
+
+    if (step.kind === "watch") {
+      if (tutorWatchObs && tutorWatchObs.resolved) tutorAdvance();
+      return;
+    }
+
+    if (step.kind === "act") {
+      const obs = tutorActObs;
+      if (!obs || obs.resolved) {
+        tutorAdvance();
+        return;
+      }
+      // Freeze on the white flash peak (near t=0), not on the rim of the window.
+      if (timeToHit(obs) <= timingBounds(obs).perfect * 0.12) openTutorAct(step, obs);
+      return;
+    }
+
+    if (step.kind === "practice") {
+      tutorMode = "practice";
+      tutorPracticeIdx = 0;
+      tutorTaught = 0;
+      tutorOk = 0;
+      tutorAdvance();
+    }
+  }
+
+  // Cue target during the scripted lesson (approach + act pause).
+  function tutorTarget() {
+    if (!tutorOn || tutorMode !== "script") return null;
+    if (tutorPause && tutorPause.mode === "act" && tutorPause.obs && !tutorPause.obs.resolved) {
+      return tutorPause.obs;
+    }
+    const step = TUTOR_SCRIPT[tutorStage];
+    if (step && step.kind === "act" && tutorActObs && !tutorActObs.resolved) {
+      const t = timeToHit(tutorActObs);
+      if (t <= TUTOR_CUE_LEAD && t >= -timingBounds(tutorActObs).good) return tutorActObs;
+    }
+    return null;
   }
 
   function tutorTaughtOne(ok) {
-    if (!tutorOn) return;
+    if (!tutorOn || tutorMode !== "practice") return;
     tutorTaught += 1;
     if (ok) tutorOk += 1;
-    if (tutorTaught < TUTOR_LESSONS) return;
-    // Clean sheet: hints just stop. Any fumble: offer the lesson again.
-    if (tutorOk >= TUTOR_LESSONS) {
-      endTutor();
-      showGrade("ОБУЧЕНИЕ ПРОЙДЕНО", "grade-perfect");
+    if (tutorTaught < TUTOR_PRACTICE.length) return;
+    if (tutorOk >= TUTOR_PASS) {
+      offerTutorPass();
     } else {
       offerTutorRetry();
     }
   }
 
+  function offerTutorPass() {
+    clearTutorState(false);
+    phase = "tutorpass";
+    updateHud();
+    showReport({
+      title: "ОБУЧЕНИЕ ПРОЙДЕНО",
+      cls: "report-good",
+      btnLabel: "В игру →",
+      action: () => {
+        markTutorSeen();
+        startRun(false);
+      },
+      note: "Дальше — обычная трасса. Полоса инерции снова стартует полной.",
+      rows: [
+        ["Верных ходов", `${tutorOk} из ${TUTOR_PRACTICE.length}`],
+        ["Свои клюшки", "подставься той же стороной"],
+        ["Чужие клюшки", "уходи в другую сторону"],
+        ["Поперёк дорожки", "прыжок"],
+      ],
+    });
+  }
+
   function offerTutorRetry() {
-    tutorOn = false;
-    tutorHideBtn.hidden = true;
+    clearTutorState(false);
     phase = "tutorfail";
     updateHud();
     showReport({
@@ -970,9 +1331,9 @@
         markTutorSeen();
         startRun(false);
       },
-      note: "Подсказки ничего не стоили: инерция цела, жизни на месте.",
+      note: "Допустима одна ошибка из шести. Инерция и жизни на месте.",
       rows: [
-        ["Верных ходов", `${tutorOk} из ${TUTOR_LESSONS}`],
+        ["Верных ходов", `${tutorOk} из ${TUTOR_PRACTICE.length}`],
         ["Свои клюшки", "подставься той же стороной"],
         ["Чужие клюшки", "уходи в другую сторону"],
         ["Поперёк дорожки", "прыжок"],
@@ -980,10 +1341,16 @@
     });
   }
 
-  function endTutor() {
+  function clearTutorState(markSeen) {
     tutorOn = false;
+    tutorMode = "off";
     tutorHideBtn.hidden = true;
-    markTutorSeen();
+    hideTutorCard();
+    if (markSeen) markTutorSeen();
+  }
+
+  function endTutor() {
+    clearTutorState(true);
   }
 
   function update(dt) {
@@ -991,6 +1358,19 @@
       pendingInputs.length = 0;
       updateFx(dt);
       return;
+    }
+
+    if (tutorPause) {
+      tutorPauseInput();
+      // World is frozen, but flashes/shake still settle so the next card is clean.
+      updateFx(dt);
+      return;
+    }
+
+    if (tutorOn && tutorMode === "script") {
+      tutorScriptTick(dt);
+      if (tutorPause) return;
+      if (tutorSwallowInputs()) pendingInputs.length = 0;
     }
 
     handleInputs();
@@ -1005,7 +1385,8 @@
     updateParticles(dt);
     updateFx(dt);
 
-    if (puck.z >= runDist) {
+    // Tutorial owns the finish — never award a goal mid-lesson.
+    if (puck.z >= runDist && !tutorOn) {
       onScored();
     }
 
@@ -1213,6 +1594,89 @@
     ctx.fill();
   }
 
+  // Ice light under the blade: same timing model as grading. One spot that
+  // widens on approach, snaps white at the perfect moment, then cools red late.
+  function drawIceGlow(x, z, obs) {
+    if (obs.resolved && obs.ok) return;
+    const tp = timingPhase(obs);
+    let phase = tp.phase;
+    let intensity = tp.intensity;
+    // A missed stick keeps a cooling late blotch while it slides past.
+    if (!phase && obs.resolved && !obs.ok) {
+      const slip = slipProgress(obs);
+      if (slip >= 0.55) return;
+      phase = "late";
+      intensity = Math.max(0, 1 - slip / 0.55) * 0.7;
+    }
+    if (!phase || intensity <= 0.02) return;
+
+    const p = project(x, z);
+    if (!p) return;
+
+    // Act-pause / coached sticks read louder; free play still needs a clear pool.
+    const actFocus =
+      tutorPause && tutorPause.mode === "act" && tutorPause.obs === obs;
+    const lessonBoost = actFocus ? 2.1 : obs.lesson ? 1.55 : 1.2;
+    let radiusMul;
+    let coreRgb;
+    let midRgb;
+    let alpha;
+
+    if (phase === "approach") {
+      // Wide, dim stick-coloured pool — "good" is coming.
+      radiusMul = 2.4 - intensity * 0.7;
+      coreRgb = obs.foe ? "255,90,120" : "120,210,255";
+      midRgb = obs.foe ? "200,40,70" : "60,150,210";
+      alpha = (0.16 + intensity * 0.28) * lessonBoost;
+    } else if (phase === "perfect") {
+      // Whole perfect window stays a hard white flash — without a floor the rim
+      // starts at intensity 0 and the free-play flash vanishes in one frame.
+      const flash = Math.max(0.88, intensity);
+      radiusMul = 1.35 - flash * 0.15;
+      coreRgb = "255,255,255";
+      midRgb = "255,255,255";
+      alpha = (0.72 + flash * 0.28) * (actFocus ? lessonBoost : Math.max(lessonBoost, 1.65));
+    } else {
+      // Cooling amber-red — the moment has slipped.
+      radiusMul = 1.3 + (1 - intensity) * 1.1;
+      coreRgb = "255,120,70";
+      midRgb = "180,40,30";
+      alpha = (0.22 + intensity * 0.3) * lessonBoost;
+    }
+
+    const fade = passAlpha(slipProgress(obs), p.d);
+    const rx = Math.max(10, 28 * p.k * radiusMul * lessonBoost);
+    const ry = Math.max(4, rx * 0.38);
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, alpha) * fade;
+    ctx.translate(p.sx, p.sy);
+    ctx.scale(1, ry / rx);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    g.addColorStop(0, `rgba(${coreRgb},1)`);
+    g.addColorStop(0.35, `rgba(${midRgb},0.55)`);
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, rx, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Extra white core only in free play / practice — paused act already holds
+    // the pool in view, so it does not need a second bloom.
+    if (phase === "perfect" && !actFocus) {
+      const coreR = rx * 0.42;
+      const core = ctx.createRadialGradient(0, 0, 0, 0, 0, coreR);
+      core.addColorStop(0, "rgba(255,255,255,1)");
+      core.addColorStop(0.45, "rgba(255,255,255,0.75)");
+      core.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.globalAlpha = Math.min(1, 0.95 * fade);
+      ctx.fillStyle = core;
+      ctx.beginPath();
+      ctx.arc(0, 0, coreR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function drawStick(obs) {
     const p = strikeProgress(obs);
     // Ease-in so the blade snaps across late — feels like a slap flying at you.
@@ -1228,6 +1692,10 @@
     const gripZ = obs.z + 8;
 
     drawShadow(tipX, tipZ, 10 + swing * 26, 1.1);
+    // Timing pool sits in the lane (not glued to the wall tip) so side sticks
+    // stay readable in practice the same way frontal ones do.
+    const glowX = tipX * 0.38;
+    drawIceGlow(glowX, tipZ, obs);
 
     const grip = projectHeight(gripX, gripZ, 48 - swing * 18);
     const tip = project(tipX, tipZ);
@@ -1300,6 +1768,7 @@
     const half = CORRIDOR.halfW - 18;
 
     drawShadow(0, z, 40 + dive * 120, 0.45);
+    drawIceGlow(0, z, obs);
 
     const gripEnd = projectHeight(-half * f, z + 10, lift + 16);
     const heel = projectHeight(half * f * 0.82, z, lift);
@@ -1442,50 +1911,47 @@
     };
   }
 
-  function annulus(cx, cy, r0, r1) {
-    ctx.beginPath();
-    ctx.arc(cx, cy, r1, 0, Math.PI * 2);
-    ctx.arc(cx, cy, r0, 0, Math.PI * 2, true);
-    ctx.fill();
-  }
+  // Pulsing pointer from mid-screen down to the inertia bar.
+  function drawGripArrow() {
+    if (!tutorPause || !tutorPause.pointGrip || !gripBarEl || phase !== "play") return;
+    const rect = gripBarEl.getBoundingClientRect();
+    const canvasRect = canvas.getBoundingClientRect();
+    const tx = rect.left + rect.width * 0.5 - canvasRect.left;
+    const ty = rect.top + rect.height * 0.5 - canvasRect.top;
+    const sx = W * 0.5;
+    const sy = H * 0.52;
+    const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 220);
 
-  // Timing school: a ring closes in on the target circle, and the green band is
-  // the perfect window. Press while the ring sits in the green.
-  function drawCueTiming(cx, cy, obs, t, scale) {
-    if (t > WINDOW_OPEN) return;
-    const rIn = 26 * scale;
-    const spread = 46 * scale;
-    // Non-linear so the last fraction of a second is not a two-pixel sliver.
-    const mapR = (time) =>
-      rIn + spread * Math.pow(Math.max(0, time) / WINDOW_OPEN, 0.55);
-    const mul = winMul(obs);
-    const rPerfect = mapR(perfectWin() * mul);
-    const rGood = mapR(goodWin() * mul);
-    const inPerfect = Math.abs(t) <= perfectWin() * mul;
-
-    ctx.fillStyle = "rgba(232,244,255,0.1)";
-    annulus(cx, cy, rIn, rGood);
-    ctx.fillStyle = inPerfect ? "rgba(120,255,180,0.4)" : "rgba(110,240,170,0.2)";
-    annulus(cx, cy, rIn, rPerfect);
-
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = `rgba(130,255,190,${inPerfect ? 0.95 : 0.6})`;
-    ctx.beginPath();
-    ctx.arc(cx, cy, rPerfect, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // The closing ring itself.
+    ctx.save();
+    ctx.strokeStyle = `rgba(255, 200, 90, ${0.45 + 0.4 * pulse})`;
+    ctx.fillStyle = `rgba(255, 200, 90, ${0.55 + 0.4 * pulse})`;
     ctx.lineWidth = 3;
-    ctx.strokeStyle = inPerfect ? "rgba(190,255,220,0.98)" : "rgba(255,255,255,0.75)";
+    ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.arc(cx, cy, mapR(t), 0, Math.PI * 2);
+    ctx.moveTo(sx, sy);
+    ctx.bezierCurveTo(sx, sy + (ty - sy) * 0.35, tx, ty - 70, tx, ty - 14);
     ctx.stroke();
+
+    // Arrow head
+    ctx.beginPath();
+    ctx.moveTo(tx, ty - 2);
+    ctx.lineTo(tx - 10, ty - 18);
+    ctx.lineTo(tx + 10, ty - 18);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.font = `700 13px ${CUE_FONT}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillStyle = `rgba(255, 220, 140, ${0.7 + 0.3 * pulse})`;
+    ctx.fillText("ИНЕРЦИЯ", tx, ty - 24);
+    ctx.restore();
   }
 
-  // Coaching overlay: light up the column to hit, name the button, and show the
-  // moment. No pause and no wall of text.
+  // Coaching overlay. On act-pause the ice glow is the star — only a compact
+  // key badge remains in the column. Approaching sticks keep a quieter fill.
   function drawTutorCue(slit) {
-    if (!tutorOn || phase !== "play") return;
+    if (!tutorOn || phase !== "play" || tutorMode !== "script") return;
     const obs = tutorTarget();
     if (!obs) return;
 
@@ -1493,19 +1959,21 @@
     const target = zones[obs.want];
     if (!target) return;
 
+    const paused = !!(tutorPause && tutorPause.mode === "act");
     const t = timeToHit(obs);
     const near = Math.max(0, Math.min(1, 1 - t / TUTOR_CUE_LEAD));
-    // Dim while the stick is far, full brightness inside the hit window.
-    const live = obs.windowOpen ? 1 : 0.35 + 0.45 * near;
+    const tp = timingPhase(obs);
+    const live = paused ? 1 : obs.windowOpen ? 0.85 : 0.35 + 0.45 * near;
     const rgb = obs.foe ? "255,70,100" : "90,200,255";
-    const scale = Math.max(0.78, Math.min(1.15, W / 900));
+    const baseScale = Math.max(0.78, Math.min(1.15, W / 900));
+    const scale = baseScale * (paused ? 0.85 : 1);
 
     ctx.save();
     ctx.lineJoin = "round";
 
     // All three columns marked, so the pick reads as a choice of three.
     ctx.lineWidth = 1.5;
-    ctx.strokeStyle = `rgba(232,244,255,${0.07 + 0.06 * near})`;
+    ctx.strokeStyle = `rgba(232,244,255,${paused ? 0.1 : 0.07 + 0.1 * live})`;
     ctx.setLineDash([6, 9]);
     for (const key of ["brace", "right"]) {
       const z = zones[key];
@@ -1516,45 +1984,59 @@
     }
     ctx.setLineDash([]);
 
-    // The column to hit, lit from the floor up so the lane stays readable.
-    const g = ctx.createLinearGradient(0, target.y + target.h, 0, target.y);
-    g.addColorStop(0, `rgba(${rgb},${0.3 * live})`);
-    g.addColorStop(1, `rgba(${rgb},0)`);
-    ctx.fillStyle = g;
-    ctx.fillRect(target.x, target.y, target.w, target.h);
+    if (!paused) {
+      // Quiet column wash while approaching — not on act-pause.
+      const g = ctx.createLinearGradient(0, target.y + target.h, 0, target.y);
+      g.addColorStop(0, `rgba(${rgb},${0.28 * live})`);
+      g.addColorStop(1, `rgba(${rgb},0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(target.x, target.y, target.w, target.h);
+    }
 
     const cx = target.x + target.w / 2;
-    const cy = target.y + target.h * 0.58;
+    // Compact badge low in the column so the ice flash stays the focus.
+    const cy = paused ? target.y + target.h * 0.72 : target.y + target.h * 0.58;
 
-    drawCueTiming(cx, cy, obs, t, scale);
-
-    // Arrow in the ring, then the button to press and where it takes you.
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillStyle = `rgba(255,255,255,${0.6 + 0.4 * live})`;
+    ctx.fillStyle = `rgba(255,255,255,${paused ? 0.8 : 0.65 + 0.35 * live})`;
     ctx.font = `800 ${22 * scale}px ${CUE_FONT}`;
-    ctx.fillText(cueArrow(obs.want), cx, cy);
+    ctx.fillText(cueKey(obs.want), cx, cy);
 
-    const below = cy + 92 * scale;
-    ctx.font = `800 ${16 * scale}px ${CUE_FONT}`;
-    ctx.fillText(cueKeyLine(obs.want), cx, below);
+    const below = cy + 28 * scale;
     ctx.font = `700 ${12 * scale}px ${CUE_FONT}`;
-    ctx.fillStyle = `rgba(232,244,255,${0.5 + 0.4 * live})`;
-    ctx.fillText(cueWord(obs.want), cx, below + 20 * scale);
+    ctx.fillStyle = `rgba(232,244,255,${paused ? 0.6 : 0.55 + 0.4 * live})`;
+    ctx.fillText(cueWord(obs.want), cx, below);
 
-    // Two lines up in the dark strip: the rule, then the timing.
-    ctx.font = `700 ${15 * scale}px ${CUE_FONT}`;
-    ctx.fillStyle = `rgba(${rgb},${0.6 + 0.4 * near})`;
-    ctx.fillText(cueCaption(obs), W / 2, slit.y + 30);
-    ctx.font = `700 ${12 * scale}px ${CUE_FONT}`;
-    ctx.fillStyle = "rgba(150,255,200,0.75)";
-    ctx.fillText("ЖМИ, КОГДА КОЛЬЦО ВОЙДЁТ В ЗЕЛЁНОЕ", W / 2, slit.y + 52);
+    // Ice-glow timing is the main lesson — louder on act-pause than the key badge.
+    ctx.font = `700 ${(paused ? 18 : 15) * Math.min(baseScale, 1.1)}px ${CUE_FONT}`;
+    if (!paused) {
+      ctx.fillStyle = `rgba(${rgb},${0.6 + 0.4 * near})`;
+      ctx.fillText(cueCaption(obs), W / 2, slit.y + 30);
+    }
+    let hint = "СМОТРИ НА БЛИК НА ЛЬДУ";
+    let hintRgb = "200,220,240";
+    if (tp.phase === "approach") {
+      hint = "БЛИК РАЗГОРАЕТСЯ — ГОТОВЬСЯ";
+      hintRgb = rgb;
+    } else if (tp.phase === "perfect" || paused) {
+      hint = "ЖМИ НА ВСПЫШКЕ";
+      hintRgb = "255,255,255";
+    } else if (tp.phase === "late") {
+      hint = "ПОЗДНО — БЛИК ОСТЫВАЕТ";
+      hintRgb = "255,140,90";
+    }
+    ctx.font = `800 ${(paused ? 17 : 12) * Math.min(baseScale, 1.1)}px ${CUE_FONT}`;
+    ctx.fillStyle = `rgba(${hintRgb},${paused ? 0.95 : 0.55 + 0.4 * live})`;
+    ctx.fillText(hint, W / 2, paused ? slit.y + slit.h * 0.38 : slit.y + 52);
     ctx.restore();
   }
 
-  // Faint column split so the tap zones are discoverable without a lesson.
+  // Faint column split so tap zones stay discoverable in practice and free play.
   function drawTapZones(slit) {
-    if (!isTouchUi() || phase !== "play" || tutorOn) return;
+    if (!isTouchUi() || phase !== "play") return;
+    // Act-pause already paints the big column cue.
+    if (tutorOn && tutorMode === "script") return;
     const third = W / 3;
     const top = slit.y + slit.h * 0.55;
     const bottom = slit.y + slit.h;
@@ -1593,9 +2075,9 @@
   // Looking from inside the puck: leaning and trembling move the view, not a disc.
   function worldJitter() {
     const t = performance.now() / 1000;
-    let jx = -braceLean * 0.5 + Math.sin(t * 25) * wobble * 4;
-    let jy = 0;
-    let roll = tilt;
+    let jx = -braceLean * 0.5 + glanceX + Math.sin(t * 25) * wobble * 4;
+    let jy = glanceY;
+    let roll = tilt + glanceRoll;
 
     if (tremble > 0) {
       const e = tremble * tremble;
@@ -1651,6 +2133,7 @@
     drawDamageFlash(slit);
     drawTapZones(slit);
     drawTutorCue(slit);
+    drawGripArrow();
   }
 
   function loop(ts) {
@@ -1673,6 +2156,8 @@
       runContinue();
       return;
     }
+    // View flicks toward the press; skating direction stays dead ahead.
+    nudgeLook(code);
     pendingInputs.push(code);
   }
 

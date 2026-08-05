@@ -279,9 +279,14 @@ body {
 }
 
 .touch-key {
-  font-size: 22px;
+  font-size: 20px;
   line-height: 1;
   font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.touch-btn-center .touch-key {
+  font-size: 14px;
 }
 
 .touch-label {
@@ -425,7 +430,6 @@ body {
   background: #fff;
 }
 
-/* Hints run in the canvas now; this only lets the player switch them off. */
 #tutor-hide {
   position: absolute;
   left: 50%;
@@ -433,6 +437,71 @@ body {
   transform: translateX(-50%);
   font-size: 12px;
   white-space: nowrap;
+  z-index: 6;
+}
+
+#tutor {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+#tutor[hidden] {
+  display: none;
+}
+
+.tutor-card {
+  max-width: min(420px, 92vw);
+  padding: 18px 22px 16px;
+  border-radius: 14px;
+  background: rgba(6, 14, 28, 0.92);
+  border: 1px solid rgba(232, 244, 255, 0.22);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  text-align: center;
+  backdrop-filter: blur(6px);
+}
+
+.tutor-card--top {
+  align-self: flex-start;
+  margin-top: max(96px, 14vh);
+}
+
+.tutor-title {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+  color: #ffb380;
+}
+
+.tutor-body {
+  font-size: 15px;
+  line-height: 1.45;
+  opacity: 0.92;
+  margin-bottom: 12px;
+}
+
+.tutor-hint {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  opacity: 0.65;
+  animation: tutor-hint-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes tutor-hint-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
 }
 
 .ghost-btn {
