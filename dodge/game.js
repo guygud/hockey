@@ -22,6 +22,9 @@
   // near is short so a braced stick stays in frame while it slides past the eye.
   // far reaches past RUN_DIST so the net is in frame from the first metre.
   const CAM = { height: 22, focal: 460, near: 6, far: 4400, horizonFrac: 0.42 };
+  // Outside chase cam — used for the fly-in / goal / stall cinematics.
+  // Keep x at 0 so the puck sits dead-centre in the fly-in / goal frames.
+  const CAM_OUT = { back: 190, height: 86, x: 0 };
   // Viewing slit through the puck body — a full-width band, no side frame.
   const SLIT = {
     topAboveHorizon: 140,
@@ -30,6 +33,16 @@
     openMax: 14,
   };
   const RUN_DIST = 4000;
+  // Goal counts at the crease; last stick stays well before it.
+  const CREASE_BACK = 200;
+  const FINAL_STICK_BACK = 420;
+  const INTRO_HOLD = 0.3;
+  const INTRO_DIVE = 0.45;
+  // Goal cam: snap outside, then rush the puck into the twine — no slow-mo crawl.
+  const GOAL_POP = 0.14;
+  const GOAL_RUSH = 2.55;
+  const GOAL_REPORT_AT = 0.95;
+  const STALL_CAM_DUR = 1.2;
   const MAX_LIVES = 3;
   const SPEED_MIN = 130;
   const SPEED_MAX = 530;
@@ -94,7 +107,7 @@
   let streak;
   let lives;
   let goals;
-  let phase; // ready | play | scored | missed | stalled
+  let phase; // ready | play | scored | missed | stalled | goalcam | stallcam
   let runDist;
   let tilt;
   let braceLean;
@@ -113,6 +126,10 @@
   let hitFlash;
   let hitFlashPerfect;
   let boostFx;
+  // 0 = eye inside the puck, 1 = chase cam outside. Cinema drives this.
+  let outside;
+  let cinema; // { mode, t, ... } | null
+  let netFlash;
   let lastSpawnZ;
   let finalSpawned;
   let gradeFlashTimer;
@@ -230,6 +247,15 @@
 
   function sfxStall() {
     tone(300, 90, 0.5, 0.16, "triangle");
+  }
+
+  function sfxFlyIn() {
+    swish(0.42, 0.14, 900, 0.55);
+    tone(220, 520, 0.28, 0.06, "sine");
+  }
+
+  function sfxCrease() {
+    tone(660, 880, 0.08, 0.07, "sine");
   }
 
   function createPuck() {
@@ -476,11 +502,11 @@
     if (obstacles.some((o) => !o.resolved && o.z > puck.z - 40)) return;
     if (finalSpawned) return;
 
-    const finalZ = runDist - 200;
+    const finalZ = runDist - FINAL_STICK_BACK;
     const lead = Math.max(puck.vz, SPEED_MIN) * spawnInterval();
     const nextZ = Math.max(lastSpawnZ + 80, puck.z + lead);
-    // Keep the corridor before the net clear, or the last stick lands in your
-    // face with no time to answer it.
+    // Keep the corridor before the crease clear — the last stick must land
+    // before the goal cam kicks in.
     const minApproach = Math.max(400, Math.max(puck.vz, SPEED_MIN) * 1.3);
 
     if (nextZ >= finalZ - minApproach) {
@@ -537,6 +563,10 @@
     hitFlash = 0;
     hitFlashPerfect = false;
     boostFx = 0;
+    netFlash = 0;
+    outside = 1;
+    cinema = { mode: "intro", t: 0, whoosh: false };
+    setCinemaActive(true);
     runStats = { perfect: 0, good: 0, wrong: 0, missed: 0, passes: 0, dodges: 0 };
     tutorStage = 0;
     tutorTimer = 0;
@@ -581,6 +611,9 @@
     tutorOn = false;
     resetRun({ keepLives: false, keepStreak: false, keepGoals: false });
     phase = "ready";
+    cinema = null;
+    outside = 0;
+    setCinemaActive(false);
     showIntro(true);
     tutorAgainBtn.hidden = !tutorSeen();
   }
@@ -613,13 +646,33 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
+  function easeInOut(t) {
+    const u = Math.max(0, Math.min(1, t));
+    return u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+  }
+
+  function setCinemaActive(on) {
+    document.body.classList.toggle("cinema", !!on);
+  }
+
+  // outside 0 = eye inside the puck, 1 = chase cam over the ice.
+  function camRig() {
+    const e = easeInOut(outside);
+    return {
+      back: camZ + CAM_OUT.back * e,
+      x: CAM_OUT.x * e,
+      h: CAM.height + (CAM_OUT.height - CAM.height) * e + camBoost,
+    };
+  }
+
   function project(x, z) {
-    const d = z - puck.z + camZ;
+    const rig = camRig();
+    const d = z - puck.z + rig.back;
     if (d < CAM.near || d > CAM.far) return null;
     const k = CAM.focal / d;
     return {
-      sx: W / 2 + x * k,
-      sy: H * CAM.horizonFrac + (CAM.height + camBoost) * k,
+      sx: W / 2 + (x - rig.x) * k,
+      sy: H * CAM.horizonFrac + rig.h * k,
       k,
       d,
     };
@@ -631,9 +684,15 @@
 
   function slitRect() {
     const open = slitOpen;
-    const top = H * CAM.horizonFrac - SLIT.topAboveHorizon - open * 0.35;
+    const e = easeInOut(outside);
+    // Inside: the puck slit. Outside: a wide cinematic frame that opens up.
+    const inTop = H * CAM.horizonFrac - SLIT.topAboveHorizon - open * 0.35;
     const bottomFrac = isTouchUi() ? SLIT.bottomFracTouch : SLIT.bottomFrac;
-    const bottom = H * bottomFrac + open * 0.65;
+    const inBottom = H * bottomFrac + open * 0.65;
+    const outTop = H * 0.08;
+    const outBottom = H * 0.92;
+    const top = inTop + (outTop - inTop) * e;
+    const bottom = inBottom + (outBottom - inBottom) * e;
     return {
       x: 0,
       y: Math.max(0, top),
@@ -878,8 +937,7 @@
 
     if (mom <= 0) {
       mom = 0;
-      puck.vz = 0;
-      onStalled();
+      startStallCam();
       return;
     }
 
@@ -1037,31 +1095,57 @@
     next();
   }
 
-  function onScored() {
-    if (phase !== "play") return;
-    phase = "scored";
+  function creaseZ() {
+    return runDist - CREASE_BACK;
+  }
+
+  function startGoalCam() {
+    if (phase !== "play" || tutorOn) return;
+    phase = "goalcam";
     streak += 1;
     goals += 1;
-    sfxGoal();
+    sfxCrease();
+    // Floor the rush speed so a soft finish still looks like a slapshot.
+    cinema = {
+      mode: "goal",
+      t: 0,
+      flightVz: Math.max(puck.vz * 1.25, SPEED_MIN * 1.8, 420),
+      hitNet: false,
+    };
+    setCinemaActive(true);
+    pendingInputs.length = 0;
+    braceFlash.hidden = true;
+    // Kick the eye out immediately so the puck is already in frame.
+    camZVel += 180;
+    slitOpenVel += 90;
     updateHud();
+  }
+
+  function finishGoalReport() {
+    phase = "scored";
     showReport({
       title: `ГОЛ! Серия ${streak}`,
       cls: "report-good",
       btnLabel: "Следующая атака →",
-      // Same life bank: keep hearts and the goal streak.
       action: () => resetRun({ keepLives: true, keepStreak: true, keepGoals: true }),
       note: nextAttemptNote(),
     });
   }
 
-  function onStalled() {
+  function startStallCam() {
     if (phase !== "play") return;
-
-    lives = Math.max(0, lives - 1);
+    phase = "stallcam";
     sfxStall();
+    cinema = { mode: "stall", t: 0 };
+    setCinemaActive(true);
+    pendingInputs.length = 0;
+    braceFlash.hidden = true;
+  }
+
+  function finishStalled() {
+    lives = Math.max(0, lives - 1);
 
     if (lives <= 0) {
-      // Three failed runs → streak dies with the life bank.
       phase = "stalled";
       const finalGoals = goals;
       streak = 0;
@@ -1085,6 +1169,84 @@
       action: () => resetRun({ keepLives: true, keepStreak: true, keepGoals: true }),
       note: nextAttemptNote(),
     });
+  }
+
+  // Returns "intro" while the fly-in owns the frame, "block" for end cinematics,
+  // or null when the normal play loop should run.
+  function updateCinema(dt) {
+    if (!cinema) return null;
+    cinema.t += dt;
+    pendingInputs.length = 0;
+
+    if (cinema.mode === "intro") {
+      if (cinema.t < INTRO_HOLD) {
+        outside = 1;
+      } else if (cinema.t < INTRO_HOLD + INTRO_DIVE) {
+        if (!cinema.whoosh) {
+          cinema.whoosh = true;
+          sfxFlyIn();
+        }
+        outside = 1 - easeInOut((cinema.t - INTRO_HOLD) / INTRO_DIVE);
+      } else {
+        outside = 0;
+        cinema = null;
+        setCinemaActive(false);
+      }
+      return "intro";
+    }
+
+    if (cinema.mode === "goal") {
+      // Hard pop to the chase cam, then accelerate into the net.
+      outside = Math.min(1, easeInOut(cinema.t / GOAL_POP) * 1.15);
+      const accel = 0.85 + 1.4 * Math.min(1, cinema.t / 0.22);
+      puck.z += cinema.flightVz * GOAL_RUSH * accel * dt;
+      if (!cinema.hitNet && puck.z >= runDist) {
+        cinema.hitNet = true;
+        cinema.hitAt = cinema.t;
+        sfxGoal();
+        netFlash = 1;
+        hitFlash = 1;
+        hitFlashPerfect = true;
+        boostFx = 1;
+        camZVel += 220;
+        camBoostVel += 260;
+        spawnSparks(36);
+      }
+      // Tiny settle past the line so the impact reads before the report.
+      if (cinema.hitNet && puck.z < runDist + 70) {
+        puck.z += cinema.flightVz * 0.35 * dt;
+      }
+      updateParticles(dt);
+      updateFx(dt);
+      netFlash = Math.max(0, netFlash - dt * 2.4);
+      updateHud();
+      const reportAt = cinema.hitNet
+        ? Math.min(GOAL_REPORT_AT, (cinema.hitAt || 0) + 0.45)
+        : GOAL_REPORT_AT;
+      if (cinema.t >= reportAt) {
+        cinema = null;
+        setCinemaActive(false);
+        finishGoalReport();
+      }
+      return "block";
+    }
+
+    if (cinema.mode === "stall") {
+      outside = easeInOut(Math.min(1, cinema.t / STALL_CAM_DUR));
+      puck.vz = Math.max(0, puck.vz * Math.pow(0.05, dt));
+      puck.z += puck.vz * dt;
+      updateParticles(dt);
+      updateFx(dt);
+      updateHud();
+      if (cinema.t >= STALL_CAM_DUR) {
+        cinema = null;
+        setCinemaActive(false);
+        finishStalled();
+      }
+      return "block";
+    }
+
+    return null;
   }
 
   // ---------- TUTORIAL ----------
@@ -1354,6 +1516,9 @@
   }
 
   function update(dt) {
+    const cine = updateCinema(dt);
+    if (cine === "block") return;
+
     if (phase !== "play") {
       pendingInputs.length = 0;
       updateFx(dt);
@@ -1364,6 +1529,17 @@
       tutorPauseInput();
       // World is frozen, but flashes/shake still settle so the next card is clean.
       updateFx(dt);
+      return;
+    }
+
+    // Fly-in: puck keeps rolling, but coaching and input wait until we're inside.
+    if (cine === "intro") {
+      updatePuck(dt);
+      maybeSpawnObstacles();
+      updateObstacles();
+      updateParticles(dt);
+      updateFx(dt);
+      updateHud();
       return;
     }
 
@@ -1385,9 +1561,9 @@
     updateParticles(dt);
     updateFx(dt);
 
-    // Tutorial owns the finish — never award a goal mid-lesson.
-    if (puck.z >= runDist && !tutorOn) {
-      onScored();
+    // Goal counts at the crease — the fly-out shows the rest into the net.
+    if (!tutorOn && puck.z >= creaseZ()) {
+      startGoalCam();
     }
 
     updateHud();
@@ -1420,6 +1596,7 @@
 
   function drawFloor() {
     const horizon = H * CAM.horizonFrac;
+    const rig = camRig();
 
     // Ice fills the whole frame; the lane is only where the puck can travel.
     const g = ctx.createLinearGradient(0, horizon, 0, H);
@@ -1429,9 +1606,10 @@
     ctx.fillStyle = g;
     ctx.fillRect(0, horizon, W, H - horizon);
 
-    // A rung is a line of constant depth, so it spans the frame at a single height.
-    const start = Math.floor(puck.z / CORRIDOR.ribStep) * CORRIDOR.ribStep;
-    for (let i = 0; i < 60; i++) {
+    // Ribs start behind the eye so the chase cam still has floor underfoot.
+    const eyeZ = puck.z - rig.back;
+    const start = Math.floor(eyeZ / CORRIDOR.ribStep) * CORRIDOR.ribStep;
+    for (let i = 0; i < 70; i++) {
       const z = start + i * CORRIDOR.ribStep;
       const p = project(0, z);
       if (!p) continue;
@@ -1446,8 +1624,9 @@
   }
 
   function drawLane() {
+    const rig = camRig();
     const farZ = puck.z + CAM.far * 0.9;
-    const nearZ = puck.z + CAM.near + 2;
+    const nearZ = puck.z - rig.back + CAM.near + 2;
     const farL = project(-CORRIDOR.halfW, farZ);
     const farR = project(CORRIDOR.halfW, farZ);
     const nearL = project(-CORRIDOR.halfW, nearZ);
@@ -1528,6 +1707,90 @@
       ctx.lineTo(tx, ty);
       ctx.stroke();
     }
+
+    // White bloom when the puck kisses the twine during the goal cam.
+    if (netFlash > 0) {
+      const flash = ctx.createRadialGradient(cx, cy, 2, cx, cy, glowR * 1.35);
+      flash.addColorStop(0, `rgba(255,255,255,${0.7 * netFlash})`);
+      flash.addColorStop(0.35, `rgba(255,180,180,${0.35 * netFlash})`);
+      flash.addColorStop(1, "rgba(255,80,80,0)");
+      ctx.fillStyle = flash;
+      ctx.beginPath();
+      ctx.arc(cx, cy, glowR * 1.35, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // The puck as a world object — only when the eye is outside it.
+  function drawPuckBody() {
+    if (outside <= 0.01) return;
+    const base = project(0, puck.z);
+    const top = projectHeight(0, puck.z, 13);
+    if (!base || !top) return;
+
+    const a = Math.min(1, outside);
+    const rx = Math.max(8, 18 * base.k);
+    const ry = Math.max(3, rx * 0.36);
+    const h = Math.max(4, base.sy - top.sy);
+
+    drawShadow(0, puck.z, 22, 0.95);
+
+    ctx.save();
+    ctx.globalAlpha = a;
+
+    // Cylinder wall.
+    const wall = ctx.createLinearGradient(base.sx - rx, top.sy, base.sx + rx, base.sy);
+    wall.addColorStop(0, "#141418");
+    wall.addColorStop(0.4, "#2a2a30");
+    wall.addColorStop(1, "#0c0c10");
+    ctx.fillStyle = wall;
+    ctx.beginPath();
+    ctx.moveTo(base.sx - rx, top.sy);
+    ctx.lineTo(base.sx + rx, top.sy);
+    ctx.ellipse(base.sx, base.sy, rx, ry, 0, 0, Math.PI, false);
+    ctx.lineTo(base.sx - rx, top.sy);
+    ctx.closePath();
+    ctx.fill();
+
+    // Top lid.
+    const lid = ctx.createRadialGradient(
+      top.sx - rx * 0.25,
+      top.sy - ry * 0.3,
+      1,
+      top.sx,
+      top.sy,
+      rx
+    );
+    lid.addColorStop(0, "#3a3a42");
+    lid.addColorStop(0.55, "#1a1a20");
+    lid.addColorStop(1, "#0a0a0e");
+    ctx.fillStyle = lid;
+    ctx.beginPath();
+    ctx.ellipse(top.sx, top.sy, rx * 0.98, ry * 0.98, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(220,230,245,0.35)";
+    ctx.lineWidth = Math.max(1, 1.4 * base.k);
+    ctx.beginPath();
+    ctx.ellipse(top.sx, top.sy, rx * 0.98, ry * 0.98, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Viewing slit — thin bright band on the near face.
+    const slitY = top.sy + h * 0.45;
+    const slitW = rx * 1.3;
+    const slitH = Math.max(2, h * 0.16);
+    const slitG = ctx.createLinearGradient(base.sx - slitW / 2, slitY, base.sx + slitW / 2, slitY);
+    slitG.addColorStop(0, "rgba(120,190,255,0)");
+    slitG.addColorStop(0.35, "rgba(180,230,255,0.85)");
+    slitG.addColorStop(0.5, "rgba(255,255,255,0.95)");
+    slitG.addColorStop(0.65, "rgba(180,230,255,0.85)");
+    slitG.addColorStop(1, "rgba(120,190,255,0)");
+    ctx.fillStyle = slitG;
+    ctx.beginPath();
+    ctx.ellipse(base.sx, slitY, slitW / 2, slitH / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
   }
 
   // 0 far away, 1 at the contact moment — drives swing / dive animation.
@@ -2112,10 +2375,13 @@
     drawFloor();
     drawLane();
     drawGoal();
+    drawPuckBody();
 
     // Resolved sticks stay in frame so they visibly slide past, not blink out.
+    // When the eye is outside, keep sticks that sit between camera and puck.
+    const rig = camRig();
     const sorted = [...obstacles]
-      .filter((o) => o.z > puck.z - 30 && slipProgress(o) < 1)
+      .filter((o) => o.z > puck.z - rig.back - 30 && slipProgress(o) < 1)
       .sort((a, b) => b.z - a.z);
 
     for (const obs of sorted) {
@@ -2131,9 +2397,11 @@
     drawSlitBody(slit);
     drawHitFlash(slit);
     drawDamageFlash(slit);
-    drawTapZones(slit);
-    drawTutorCue(slit);
-    drawGripArrow();
+    if (!cinema) {
+      drawTapZones(slit);
+      drawTutorCue(slit);
+      drawGripArrow();
+    }
   }
 
   function loop(ts) {
@@ -2151,6 +2419,7 @@
       if (code === "brace") startRun();
       return;
     }
+    if (cinema) return;
     if (phase !== "play") {
       // Between rounds any input confirms the report — no dead taps on a phone.
       runContinue();

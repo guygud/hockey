@@ -179,6 +179,20 @@ body {
   font-size: 12px;
   letter-spacing: 0.08em;
   opacity: 0.8;
+  transition: opacity 0.25s ease;
+}
+
+/* Fly-in / goal / stall cinematics — keep the frame clean. */
+body.cinema .controls-hint,
+body.cinema #touch-controls,
+body.cinema #tutor-hide,
+body.cinema #brace-flash {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+body.cinema #touch-controls {
+  visibility: hidden;
 }
 
 /* Colour key stays on screen: the rule is the whole game. */
