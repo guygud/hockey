@@ -4,10 +4,10 @@
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d");
   const streakEl = document.getElementById("streak");
-  const livesEl = document.getElementById("lives");
-  const gripFill = document.getElementById("grip-fill");
-  const gripValue = document.getElementById("grip-value");
-  const progressFill = document.getElementById("progress-fill");
+  const livesBoxEl = document.getElementById("lives-box");
+  const heartEls = livesBoxEl
+    ? Array.from(livesBoxEl.querySelectorAll(".heart"))
+    : [];
   const braceFlash = document.getElementById("brace-flash");
   const statusEl = document.getElementById("status");
   const restartBtn = document.getElementById("restart-btn");
@@ -16,6 +16,9 @@
   const startBtn = document.getElementById("start-btn");
   const tutorHideBtn = document.getElementById("tutor-hide");
   const tutorAgainBtn = document.getElementById("tutor-again");
+  const pauseBtn = document.getElementById("pause-btn");
+  const pauseOverlay = document.getElementById("pause-overlay");
+  const resumeBtn = document.getElementById("resume-btn");
 
   const CORRIDOR = { halfW: 200, ribStep: 60 };
   // Eye sits low over the ice; far covers the short track so the net is visible.
@@ -46,6 +49,28 @@
   const MAX_LIVES = 3;
   const SPEED_MIN = 130;
   const SPEED_MAX = 530;
+  // Display scale: SPEED_MAX ≈ world-record slapshot (~170 km/h).
+  const SPEED_KMH_SCALE = 170 / SPEED_MAX;
+
+  // ---- Stick look (tweak these) ----
+  // Angles are degrees on screen. 0 = horizontal.
+  // Positive value = handle raised above the blade (toward the top of the screen).
+  // swing goes 0 (just appeared) → 1 (at the strike / "stopped").
+  const STICK = {
+    angleAppearDeg: -45, // tilt when the stick first shows up
+    angleStopDeg: -32, // tilt when it reaches the strike pose
+    crossAppearDeg: -28, // same for the dual-red SPACE obstacle
+    crossStopDeg: -18,
+    worldLen: 270, // sprite length in world units (scales with distance)
+    maxScreenFrac: 1.82, // cap: never wider than this fraction of the view
+    tipHeight: -10, // blade height above the ice
+    tipZOffset: -1, // blade depth offset from obstacle.z
+  };
+  // Goal net. Positive yDownFrac = lower on screen (fraction of goal height).
+  const GOAL = {
+    yDownFrac: 0.3,
+    postHeight: 110,
+  };
   // You launch at top speed. Inertia is a mistake budget, not a resource to grow:
   // any mistake takes half the bar, so two of them end the attempt.
   const MOM_START = 1;
@@ -151,13 +176,42 @@
   let tutorTaught = 0;
   let tutorOk = 0;
   let pendingAlt = null;
+  let paused = false;
 
   const tutorEl = document.getElementById("tutor");
   const tutorTitleEl = document.getElementById("tutor-title");
   const tutorBodyEl = document.getElementById("tutor-body");
   const tutorHintEl = document.getElementById("tutor-hint");
   const tutorCardEl = tutorEl ? tutorEl.querySelector(".tutor-card") : null;
-  const gripBarEl = document.querySelector(".grip-bar");
+  const hudStatsEl = document.querySelector(".hud-stats");
+  const levelNumEl = document.getElementById("level-num");
+  const speedEl = document.getElementById("speed");
+
+  // Neon art pack — paths are relative to dodge/index.html.
+  const ASSET_SRC = {
+    blueLeft: "../assets/blue-left.png",
+    blueRight: "../assets/blue-right.png",
+    redLeft: "../assets/red-left.png",
+    redRight: "../assets/red_right.png",
+    puck: "../assets/puck.png",
+    ice: "../assets/ice.png",
+    iceColor: "../assets/ice-color.png",
+    iceColor2: "../assets/ice-color2.png",
+    gate: "../assets/gate.svg",
+    board: "../assets/board.svg",
+    borderTop: "../assets/border-top.png",
+    signal: "../assets/signal.svg",
+    hit: "../assets/hit.png",
+  };
+  const imgs = {};
+  for (const [key, src] of Object.entries(ASSET_SRC)) {
+    const img = new Image();
+    img.src = src;
+    imgs[key] = img;
+  }
+  function imgReady(img) {
+    return !!(img && img.complete && img.naturalWidth > 0);
+  }
 
   // ---------- AUDIO ----------
 
@@ -304,8 +358,8 @@
     {
       kind: "say",
       delay: 0.8,
-      title: "ИНЕРЦИЯ",
-      body: "Чтобы докатиться до ворот, скорость не должна падать до нуля. Следи за полосой внизу.",
+      title: "СКОРОСТЬ",
+      body: "Чтобы докатиться до ворот, скорость не должна падать до нуля. Следи за числом км/ч сверху.",
       pointGrip: true,
     },
     { kind: "spawn", side: null, foe: true, demo: true },
@@ -332,7 +386,7 @@
     {
       kind: "act",
       title: "ПРЫЖОК",
-      body: "На вспышке блика — прыжок.",
+      body: "Две красные с двух сторон — на вспышке блика прыгай.",
     },
     { kind: "spawn", side: null, foe: true },
     {
@@ -343,7 +397,7 @@
     {
       kind: "say",
       title: "ТЕПЕРЬ САМ",
-      body: "Дальше без пауз. Две свои, две чужие сбоку и две поперёк — с запасом времени.",
+      body: "Дальше без пауз. Две свои, две чужие сбоку и два двойных красных — с запасом времени.",
       refill: true,
     },
     { kind: "practice" },
@@ -521,8 +575,12 @@
     lastSpawnZ = nextZ;
   }
 
-  function livesText() {
-    return "♥".repeat(Math.max(0, lives)) + "♡".repeat(Math.max(0, MAX_LIVES - lives));
+  function renderLives() {
+    for (let i = 0; i < heartEls.length; i++) {
+      const filled = i < lives;
+      heartEls[i].classList.toggle("filled", filled);
+      heartEls[i].classList.toggle("empty", !filled);
+    }
   }
 
   // keepLives / keepStreak: survive between attempts inside the same 3-life set.
@@ -588,6 +646,7 @@
     if (!opts.keepGoals) goals = 0;
     pendingContinue = null;
     pendingAlt = null;
+    setPaused(false);
     tutorHideBtn.hidden = !tutorOn;
     hideTutorCard();
     statusEl.hidden = true;
@@ -604,6 +663,7 @@
   function showIntro(visible) {
     introEl.hidden = !visible;
     document.body.classList.toggle("intro-open", visible);
+    if (visible) setPaused(false);
   }
 
   function resetGame() {
@@ -627,13 +687,37 @@
   }
 
   function updateHud() {
-    streakEl.textContent = String(streak);
-    livesEl.textContent = livesText();
-    const g = Math.max(0, Math.min(1, mom));
-    gripFill.style.transform = `scaleX(${g})`;
-    gripValue.textContent = String(Math.round(g * 100));
-    const prog = Math.max(0, Math.min(1, puck.z / runDist));
-    progressFill.style.transform = `scaleX(${prog})`;
+    if (streakEl) streakEl.textContent = String(streak);
+    renderLives();
+    if (levelNumEl) levelNumEl.textContent = String(level + 1);
+    if (speedEl) {
+      speedEl.textContent = (Math.max(puck.vz, 0) * SPEED_KMH_SCALE).toFixed(1);
+    }
+    if (pauseBtn) {
+      const canPause = phase === "play" && !cinema && !tutorPause;
+      pauseBtn.hidden = !canPause && !paused;
+      pauseBtn.disabled = !canPause && !paused;
+    }
+  }
+
+  function setPaused(on) {
+    if (on === paused) return;
+    if (on) {
+      if (phase !== "play" || cinema || tutorPause) return;
+      paused = true;
+      if (pauseOverlay) pauseOverlay.hidden = false;
+      document.body.classList.add("paused");
+    } else {
+      paused = false;
+      if (pauseOverlay) pauseOverlay.hidden = true;
+      document.body.classList.remove("paused");
+      lastTs = performance.now();
+    }
+    updateHud();
+  }
+
+  function togglePause() {
+    setPaused(!paused);
   }
 
   function resize() {
@@ -653,6 +737,8 @@
 
   function setCinemaActive(on) {
     document.body.classList.toggle("cinema", !!on);
+    if (on) setPaused(false);
+    updateHud();
   }
 
   // outside 0 = eye inside the puck, 1 = chase cam over the ice.
@@ -1284,7 +1370,7 @@
   }
 
   function cueCaption(obs) {
-    if (obs.side === 0) return "ЧУЖАЯ ПОПЕРЁК — ПРЫЖОК";
+    if (obs.side === 0) return "ДВЕ КРАСНЫЕ — ПРЫЖОК";
     return obs.foe ? "ЧУЖАЯ — УХОДИ В ДРУГУЮ" : "СВОЯ — ПОДСТАВЬСЯ";
   }
 
@@ -1292,6 +1378,7 @@
     if (tutorEl) tutorEl.hidden = true;
     if (tutorCardEl) tutorCardEl.classList.remove("tutor-card--top");
     tutorPause = null;
+    updateHud();
   }
 
   function showTutorCard(step, opts = {}) {
@@ -1319,6 +1406,8 @@
     };
     showTutorCard(step, { mode: "say" });
     pendingInputs.length = 0;
+    setPaused(false);
+    updateHud();
   }
 
   function openTutorAct(step, obs) {
@@ -1330,6 +1419,8 @@
     };
     showTutorCard(step, { mode: "act" });
     pendingInputs.length = 0;
+    setPaused(false);
+    updateHud();
   }
 
   function tutorAdvance() {
@@ -1474,7 +1565,7 @@
         ["Верных ходов", `${tutorOk} из ${TUTOR_PRACTICE.length}`],
         ["Свои клюшки", "подставься той же стороной"],
         ["Чужие клюшки", "уходи в другую сторону"],
-        ["Поперёк дорожки", "прыжок"],
+        ["Две красные сразу", "прыжок"],
       ],
     });
   }
@@ -1498,7 +1589,7 @@
         ["Верных ходов", `${tutorOk} из ${TUTOR_PRACTICE.length}`],
         ["Свои клюшки", "подставься той же стороной"],
         ["Чужие клюшки", "уходи в другую сторону"],
-        ["Поперёк дорожки", "прыжок"],
+        ["Две красные сразу", "прыжок"],
       ],
     });
   }
@@ -1572,24 +1663,36 @@
   // ---------- RENDER ----------
 
   function drawArenaStrip() {
-    // Narrow band of arena above the horizon — sky is cut by the slit frame.
     const horizon = H * CAM.horizonFrac;
     const top = horizon - SLIT.topAboveHorizon - 60;
+    const stripH = horizon - top + 2;
     const g = ctx.createLinearGradient(0, top, 0, horizon);
-    g.addColorStop(0, "#05090f");
-    g.addColorStop(0.5, "#0b1522");
-    g.addColorStop(1, "#1a3048");
+    g.addColorStop(0, "#12081f");
+    g.addColorStop(0.45, "#2a1050");
+    g.addColorStop(1, "#6b3aa8");
     ctx.fillStyle = g;
-    ctx.fillRect(0, top, W, horizon - top + 2);
+    ctx.fillRect(0, top, W, stripH);
 
-    // Dim stands silhouette so the far end is not an empty void.
-    ctx.strokeStyle = "rgba(90, 130, 165, 0.16)";
-    ctx.lineWidth = 1;
-    for (let i = 1; i <= 3; i++) {
-      const y = horizon - (SLIT.topAboveHorizon * i) / 4;
+    // Panel wall behind the net, then the curved board rail on top.
+    if (imgReady(imgs.borderTop)) {
+      const wallH = Math.max(40, Math.min(110, SLIT.topAboveHorizon * 0.7));
+      ctx.save();
+      ctx.globalAlpha = 0.95;
+      ctx.drawImage(imgs.borderTop, -W * 0.02, horizon - wallH * 0.92, W * 1.04, wallH);
+      ctx.restore();
+    }
+    if (imgReady(imgs.board)) {
+      const boardH = Math.max(28, Math.min(90, SLIT.topAboveHorizon * 0.55));
+      ctx.save();
+      ctx.globalAlpha = 0.96;
+      ctx.drawImage(imgs.board, -W * 0.05, horizon - boardH * 0.72, W * 1.1, boardH);
+      ctx.restore();
+    } else if (!imgReady(imgs.borderTop)) {
+      ctx.strokeStyle = "rgba(250, 180, 255, 0.35)";
+      ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(W, y);
+      ctx.moveTo(0, horizon - 2);
+      ctx.lineTo(W, horizon - 2);
       ctx.stroke();
     }
   }
@@ -1597,25 +1700,50 @@
   function drawFloor() {
     const horizon = H * CAM.horizonFrac;
     const rig = camRig();
+    const iceY = horizon - 8;
+    const iceH = H - horizon + 24;
 
-    // Ice fills the whole frame; the lane is only where the puck can travel.
+    // Fallback underpaint if textures have not loaded yet.
     const g = ctx.createLinearGradient(0, horizon, 0, H);
-    g.addColorStop(0, "#2f5470");
-    g.addColorStop(0.3, "#4d7893");
-    g.addColorStop(1, "#6f97ae");
+    g.addColorStop(0, "#5a2d8a");
+    g.addColorStop(0.35, "#7a45b0");
+    g.addColorStop(1, "#3d1866");
     ctx.fillStyle = g;
     ctx.fillRect(0, horizon, W, H - horizon);
 
-    // Ribs start behind the eye so the chase cam still has floor underfoot.
+    if (imgReady(imgs.ice)) {
+      ctx.save();
+      ctx.globalAlpha = 0.97;
+      ctx.drawImage(imgs.ice, 0, iceY, W, iceH);
+      ctx.restore();
+    }
+
+    // Extra purple tint / banding marks on the ice.
+    if (imgReady(imgs.iceColor)) {
+      ctx.save();
+      ctx.globalAlpha = 0.42;
+      ctx.globalCompositeOperation = "multiply";
+      ctx.drawImage(imgs.iceColor, 0, iceY, W, iceH);
+      ctx.restore();
+    }
+    if (imgReady(imgs.iceColor2)) {
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.globalCompositeOperation = "screen";
+      ctx.drawImage(imgs.iceColor2, 0, iceY, W, iceH);
+      ctx.restore();
+    }
+
+    // Soft skate-line ribs for speed.
     const eyeZ = puck.z - rig.back;
     const start = Math.floor(eyeZ / CORRIDOR.ribStep) * CORRIDOR.ribStep;
     for (let i = 0; i < 70; i++) {
       const z = start + i * CORRIDOR.ribStep;
       const p = project(0, z);
       if (!p) continue;
-      const alpha = Math.max(0.05, 0.42 - i * 0.008);
-      ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
-      ctx.lineWidth = Math.max(1.2, p.k * 1.6);
+      const alpha = Math.max(0.03, 0.22 - i * 0.004);
+      ctx.strokeStyle = `rgba(255,230,255,${alpha})`;
+      ctx.lineWidth = Math.max(1, p.k * 1.2);
       ctx.beginPath();
       ctx.moveTo(0, p.sy);
       ctx.lineTo(W, p.sy);
@@ -1633,8 +1761,7 @@
     const nearR = project(CORRIDOR.halfW, nearZ);
     if (!farL || !farR || !nearL || !nearR) return;
 
-    // Lit strip: ice runs everywhere, but this is the road the puck is on.
-    ctx.fillStyle = "rgba(216, 240, 255, 0.1)";
+    ctx.fillStyle = "rgba(255, 210, 255, 0.07)";
     ctx.beginPath();
     ctx.moveTo(farL.sx, farL.sy);
     ctx.lineTo(farR.sx, farR.sy);
@@ -1643,8 +1770,8 @@
     ctx.closePath();
     ctx.fill();
 
-    ctx.strokeStyle = "rgba(195, 228, 250, 0.42)";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(255, 220, 120, 0.55)";
+    ctx.lineWidth = 2.5;
     for (const [a, b] of [[farL, nearL], [farR, nearR]]) {
       ctx.beginPath();
       ctx.moveTo(a.sx, a.sy);
@@ -1657,66 +1784,53 @@
     const z = runDist;
     const half = 100;
     const posts = [
-      projectHeight(-half, z, 110),
-      projectHeight(half, z, 110),
+      projectHeight(-half, z, GOAL.postHeight),
+      projectHeight(half, z, GOAL.postHeight),
     ];
     const bases = [project(-half, z), project(half, z)];
     if (!posts[0] || !posts[1] || !bases[0] || !bases[1]) return;
 
-    // Soft red halo so the net reads through the slit from the first frame.
     const cx = (bases[0].sx + bases[1].sx) / 2;
     const cy = (posts[0].sy + bases[0].sy) / 2;
     const glowR = Math.max(30, Math.abs(bases[1].sx - bases[0].sx) * 0.7);
-    const glow = ctx.createRadialGradient(cx, cy, 4, cx, cy, glowR);
-    glow.addColorStop(0, "rgba(255, 60, 60, 0.35)");
-    glow.addColorStop(0.55, "rgba(255, 40, 40, 0.12)");
-    glow.addColorStop(1, "rgba(255, 40, 40, 0)");
+    const goalW = Math.abs(bases[1].sx - bases[0].sx) * 1.2;
+    const goalH = Math.max(24, Math.abs(bases[0].sy - posts[0].sy) * 1.25);
+    const goalY = posts[0].sy - goalH * 0.08 + goalH * GOAL.yDownFrac;
+
+    const glow = ctx.createRadialGradient(cx, cy + goalH * GOAL.yDownFrac * 0.5, 4, cx, cy + goalH * GOAL.yDownFrac * 0.5, glowR);
+    glow.addColorStop(0, "rgba(255, 140, 255, 0.35)");
+    glow.addColorStop(0.55, "rgba(180, 80, 255, 0.14)");
+    glow.addColorStop(1, "rgba(120, 40, 200, 0)");
     ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
+    ctx.arc(cx, cy + goalH * GOAL.yDownFrac * 0.5, glowR, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = "rgba(255, 45, 45, 0.22)";
-    ctx.beginPath();
-    ctx.moveTo(bases[0].sx, bases[0].sy);
-    ctx.lineTo(posts[0].sx, posts[0].sy);
-    ctx.lineTo(posts[1].sx, posts[1].sy);
-    ctx.lineTo(bases[1].sx, bases[1].sy);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.strokeStyle = "#ff3b3b";
-    ctx.lineWidth = Math.max(3, posts[0].k * 6);
-    ctx.beginPath();
-    ctx.moveTo(bases[0].sx, bases[0].sy);
-    ctx.lineTo(posts[0].sx, posts[0].sy);
-    ctx.lineTo(posts[1].sx, posts[1].sy);
-    ctx.lineTo(bases[1].sx, bases[1].sy);
-    ctx.stroke();
-
-    ctx.strokeStyle = "rgba(255,90,90,0.4)";
-    ctx.lineWidth = Math.max(1, posts[0].k);
-    for (let i = 1; i < 5; i++) {
-      const t = i / 5;
-      const bx = bases[0].sx + (bases[1].sx - bases[0].sx) * t;
-      const by = bases[0].sy + (bases[1].sy - bases[0].sy) * t;
-      const tx = posts[0].sx + (posts[1].sx - posts[0].sx) * t;
-      const ty = posts[0].sy + (posts[1].sy - posts[0].sy) * t;
+    if (imgReady(imgs.gate)) {
+      ctx.save();
+      ctx.globalAlpha = 0.98;
+      ctx.drawImage(imgs.gate, cx - goalW / 2, goalY, goalW, goalH);
+      ctx.restore();
+    } else {
+      ctx.strokeStyle = "#e8a0ff";
+      ctx.lineWidth = Math.max(3, posts[0].k * 6);
       ctx.beginPath();
-      ctx.moveTo(bx, by);
-      ctx.lineTo(tx, ty);
+      ctx.moveTo(bases[0].sx, bases[0].sy);
+      ctx.lineTo(posts[0].sx, posts[0].sy);
+      ctx.lineTo(posts[1].sx, posts[1].sy);
+      ctx.lineTo(bases[1].sx, bases[1].sy);
       ctx.stroke();
     }
 
-    // White bloom when the puck kisses the twine during the goal cam.
     if (netFlash > 0) {
-      const flash = ctx.createRadialGradient(cx, cy, 2, cx, cy, glowR * 1.35);
+      const flashCy = cy + goalH * GOAL.yDownFrac * 0.5;
+      const flash = ctx.createRadialGradient(cx, flashCy, 2, cx, flashCy, glowR * 1.35);
       flash.addColorStop(0, `rgba(255,255,255,${0.7 * netFlash})`);
-      flash.addColorStop(0.35, `rgba(255,180,180,${0.35 * netFlash})`);
-      flash.addColorStop(1, "rgba(255,80,80,0)");
+      flash.addColorStop(0.35, `rgba(255,180,255,${0.4 * netFlash})`);
+      flash.addColorStop(1, "rgba(200,80,255,0)");
       ctx.fillStyle = flash;
       ctx.beginPath();
-      ctx.arc(cx, cy, glowR * 1.35, 0, Math.PI * 2);
+      ctx.arc(cx, flashCy, glowR * 1.35, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -1725,72 +1839,76 @@
   function drawPuckBody() {
     if (outside <= 0.01) return;
     const base = project(0, puck.z);
-    const top = projectHeight(0, puck.z, 13);
-    if (!base || !top) return;
+    if (!base) return;
 
     const a = Math.min(1, outside);
-    const rx = Math.max(8, 18 * base.k);
-    const ry = Math.max(3, rx * 0.36);
-    const h = Math.max(4, base.sy - top.sy);
-
-    drawShadow(0, puck.z, 22, 0.95);
+    drawShadow(0, puck.z, 26, 0.95);
 
     ctx.save();
     ctx.globalAlpha = a;
-
-    // Cylinder wall.
-    const wall = ctx.createLinearGradient(base.sx - rx, top.sy, base.sx + rx, base.sy);
-    wall.addColorStop(0, "#141418");
-    wall.addColorStop(0.4, "#2a2a30");
-    wall.addColorStop(1, "#0c0c10");
-    ctx.fillStyle = wall;
-    ctx.beginPath();
-    ctx.moveTo(base.sx - rx, top.sy);
-    ctx.lineTo(base.sx + rx, top.sy);
-    ctx.ellipse(base.sx, base.sy, rx, ry, 0, 0, Math.PI, false);
-    ctx.lineTo(base.sx - rx, top.sy);
-    ctx.closePath();
-    ctx.fill();
-
-    // Top lid.
-    const lid = ctx.createRadialGradient(
-      top.sx - rx * 0.25,
-      top.sy - ry * 0.3,
-      1,
-      top.sx,
-      top.sy,
-      rx
-    );
-    lid.addColorStop(0, "#3a3a42");
-    lid.addColorStop(0.55, "#1a1a20");
-    lid.addColorStop(1, "#0a0a0e");
-    ctx.fillStyle = lid;
-    ctx.beginPath();
-    ctx.ellipse(top.sx, top.sy, rx * 0.98, ry * 0.98, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = "rgba(220,230,245,0.35)";
-    ctx.lineWidth = Math.max(1, 1.4 * base.k);
-    ctx.beginPath();
-    ctx.ellipse(top.sx, top.sy, rx * 0.98, ry * 0.98, 0, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Viewing slit — thin bright band on the near face.
-    const slitY = top.sy + h * 0.45;
-    const slitW = rx * 1.3;
-    const slitH = Math.max(2, h * 0.16);
-    const slitG = ctx.createLinearGradient(base.sx - slitW / 2, slitY, base.sx + slitW / 2, slitY);
-    slitG.addColorStop(0, "rgba(120,190,255,0)");
-    slitG.addColorStop(0.35, "rgba(180,230,255,0.85)");
-    slitG.addColorStop(0.5, "rgba(255,255,255,0.95)");
-    slitG.addColorStop(0.65, "rgba(180,230,255,0.85)");
-    slitG.addColorStop(1, "rgba(120,190,255,0)");
-    ctx.fillStyle = slitG;
-    ctx.beginPath();
-    ctx.ellipse(base.sx, slitY, slitW / 2, slitH / 2, 0, 0, Math.PI * 2);
-    ctx.fill();
-
+    if (imgReady(imgs.puck)) {
+      const w = Math.max(28, 52 * base.k);
+      const h = w * (imgs.puck.naturalHeight / imgs.puck.naturalWidth);
+      ctx.drawImage(imgs.puck, base.sx - w / 2, base.sy - h * 0.5, w, h);
+    } else {
+      const top = projectHeight(0, puck.z, 13);
+      if (!top) {
+        ctx.restore();
+        return;
+      }
+      const rx = Math.max(8, 18 * base.k);
+      const ry = Math.max(3, rx * 0.36);
+      ctx.fillStyle = "#2a2a30";
+      ctx.beginPath();
+      ctx.ellipse(base.sx, base.sy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#4a3a6a";
+      ctx.beginPath();
+      ctx.ellipse(top.sx, top.sy, rx * 0.98, ry * 0.98, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
+  }
+
+  function stickSprite(foe, side) {
+    if (side < 0) return foe ? imgs.redLeft : imgs.blueLeft;
+    return foe ? imgs.redRight : imgs.blueRight;
+  }
+
+  // Lerp appear→stop angles by swing (0 = just appeared, 1 = strike pose).
+  function stickTiltRad(swing, appearDeg, stopDeg) {
+    const a = appearDeg * (Math.PI / 180);
+    const b = stopDeg * (Math.PI / 180);
+    const t = Math.max(0, Math.min(1, swing));
+    return a + (b - a) * t;
+  }
+
+  // Side-specific PNGs (blade already faces the lane). Anchor at the BLADE tip;
+  // handle trails toward the boards. Angle comes only from STICK config.
+  function drawTiltedStick(img, tipX, tipZ, side, swing, alpha, appearDeg, stopDeg) {
+    if (!imgReady(img)) return null;
+    const tip = projectHeight(tipX, tipZ, STICK.tipHeight);
+    if (!tip) return null;
+    const rawW = STICK.worldLen * tip.k;
+    const drawW = Math.max(28, Math.min(W * STICK.maxScreenFrac, rawW));
+    const drawH = drawW * (img.naturalHeight / Math.max(1, img.naturalWidth));
+    const tilt = stickTiltRad(swing, appearDeg, stopDeg);
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(tip.sx, tip.sy);
+    // Positive config angle = handle raised. Sign flips per side so both lift up.
+    ctx.rotate(side < 0 ? -tilt : tilt);
+    // Left assets: blade on the right edge → draw ending at tip.
+    // Right assets: blade on the left edge → draw starting at tip.
+    if (side < 0) ctx.drawImage(img, -drawW, -drawH / 2, drawW, drawH);
+    else ctx.drawImage(img, 0, -drawH / 2, drawW, drawH);
+    ctx.restore();
+    return tip;
+  }
+
+  function stickTipX(side, swing, push) {
+    return side * (CORRIDOR.halfW * (1.05 - swing * 1.05 + push));
   }
 
   // 0 far away, 1 at the contact moment — drives swing / dive animation.
@@ -1923,9 +2041,7 @@
     ctx.arc(0, 0, rx, 0, Math.PI * 2);
     ctx.fill();
 
-    // Extra white core only in free play / practice — paused act already holds
-    // the pool in view, so it does not need a second bloom.
-    if (phase === "perfect" && !actFocus) {
+    if (phase === "perfect" && !actFocus && !imgReady(imgs.signal)) {
       const coreR = rx * 0.42;
       const core = ctx.createRadialGradient(0, 0, 0, 0, 0, coreR);
       core.addColorStop(0, "rgba(255,255,255,1)");
@@ -1938,55 +2054,63 @@
       ctx.fill();
     }
     ctx.restore();
+
+    // Perfect window: yellow starburst (drawn outside the ellipse scale).
+    if (phase === "perfect" && imgReady(imgs.signal)) {
+      const flash = Math.max(0.88, intensity);
+      const size = Math.max(48, rx * 2.6);
+      const pulse = 0.85 + 0.15 * Math.sin(performance.now() / 90);
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, (0.78 + flash * 0.22) * fade * pulse * (actFocus ? 1.05 : 1));
+      ctx.drawImage(imgs.signal, p.sx - size / 2, p.sy - size / 2, size, size);
+      ctx.restore();
+    }
   }
 
   function drawStick(obs) {
     const p = strikeProgress(obs);
-    // Ease-in so the blade snaps across late — feels like a slap flying at you.
     const swing = p * p * (3 - 2 * p);
     const side = obs.side;
-    // A taken pass skids back out to its side; a dodged foe swings through where
-    // you were and carries on across; a stick that got you drags over the middle.
     const slip = slipProgress(obs);
     const push = obs.ok ? (obs.foe ? -slip * 1.6 : slip * 1.1) : slip * 0.35;
-    const tipX = side * (CORRIDOR.halfW * (1 - swing * 0.92 + push));
-    const gripX = side * (CORRIDOR.halfW * (0.95 - swing * 0.25 + push * 0.5));
-    const tipZ = obs.z - swing * 40;
-    const gripZ = obs.z + 8;
+    const tipX = stickTipX(side, swing, push);
+    const tipZ = obs.z + STICK.tipZOffset;
 
-    drawShadow(tipX, tipZ, 10 + swing * 26, 1.1);
-    // Timing pool sits in the lane (not glued to the wall tip) so side sticks
-    // stay readable in practice the same way frontal ones do.
-    const glowX = tipX * 0.38;
-    drawIceGlow(glowX, tipZ, obs);
+    drawShadow(tipX, tipZ, 12 + swing * 22, 1.1);
+    drawIceGlow(tipX * 0.38, tipZ, obs);
 
-    const grip = projectHeight(gripX, gripZ, 48 - swing * 18);
-    const tip = project(tipX, tipZ);
-    const bladeEnd = project(tipX - side * (8 + swing * 18), tipZ + 4);
-    if (!grip || !tip || !bladeEnd) return;
+    const tip = projectHeight(tipX, tipZ, STICK.tipHeight);
+    if (!tip) return;
 
     const pal = stickPalette(obs);
+    const alpha = passAlpha(slip, tip.d);
+    const sprite = stickSprite(obs.foe, side);
+
     ctx.save();
-    ctx.globalAlpha = passAlpha(slip, tip.d);
-    drawTipGlow(tip, pal, 1);
-    ctx.strokeStyle = pal.shaft;
-    ctx.lineWidth = Math.min(NEAR_W_CAP, Math.max(3, (5 + swing * 3) * tip.k));
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(grip.sx, grip.sy);
-    ctx.lineTo(tip.sx, tip.sy);
-    ctx.stroke();
+    ctx.globalAlpha = alpha;
+    drawTipGlow(tip, pal, 1.15);
+    ctx.restore();
 
-    // Blade flares as it comes through the middle.
-    ctx.lineWidth = Math.min(NEAR_W_CAP, Math.max(4, (7 + swing * 6) * tip.k));
-    ctx.strokeStyle = pal.blade;
-    ctx.beginPath();
-    ctx.moveTo(tip.sx, tip.sy);
-    ctx.lineTo(bladeEnd.sx, bladeEnd.sy);
-    ctx.stroke();
+    if (!drawTiltedStick(sprite, tipX, tipZ, side, swing, alpha, STICK.angleAppearDeg, STICK.angleStopDeg)) {
+      const gripX = side * (CORRIDOR.halfW * 1.45);
+      const grip = projectHeight(gripX, tipZ, 18);
+      if (grip) {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = pal.shaft;
+        ctx.lineWidth = Math.min(NEAR_W_CAP, Math.max(3, (5 + swing * 3) * tip.k));
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(grip.sx, grip.sy);
+        ctx.lineTo(tip.sx, tip.sy);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
 
-    // Scrape sparks only where a blade actually touched the shell.
     if (obs.ok && !obs.foe && slip > 0 && slip < 0.7) {
+      ctx.save();
+      ctx.globalAlpha = alpha;
       ctx.strokeStyle = `rgba(${pal.spark},${0.5 * (1 - slip)})`;
       ctx.lineWidth = Math.max(1.5, 2 * tip.k);
       for (let i = 0; i < 4; i++) {
@@ -1997,75 +2121,52 @@
         ctx.lineTo(tip.sx + Math.cos(a) * r, tip.sy + Math.sin(a) * r * 0.6);
         ctx.stroke();
       }
-    }
-    ctx.restore();
-
-    // Motion streaks when the swing is live.
-    if (swing > 0.35 && !obs.resolved) {
-      ctx.strokeStyle = pal.trail;
-      ctx.lineWidth = Math.max(2, 3 * tip.k);
-      for (let i = 1; i <= 3; i++) {
-        const back = swing - i * 0.08;
-        if (back < 0) continue;
-        const bx = side * (CORRIDOR.halfW * (1 - back * 0.92));
-        const bz = obs.z - back * 40;
-        const bp = project(bx, bz);
-        if (!bp) continue;
-        ctx.beginPath();
-        ctx.moveTo(bp.sx, bp.sy);
-        ctx.lineTo(tip.sx, tip.sy);
-        ctx.stroke();
-      }
+      ctx.restore();
     }
   }
 
-  // Frontal obstacle: a stick laid across the lane, blade turned at one end.
+  // "Cross" is a pinch: two red sticks flying in from both sides. SPACE hops.
   function drawCross(obs) {
     const p = strikeProgress(obs);
-    const dive = p * p * (3 - 2 * p);
+    const swing = p * p * (3 - 2 * p);
     const slip = slipProgress(obs);
-    // Drops in from above the slit, then sinks under the eye once you hop it.
-    const lift = (1 - dive) * 150 - (obs.ok ? slip * 130 : 0);
-    const z = obs.z - dive * 20;
-    const f = obs.flip;
-    const half = CORRIDOR.halfW - 18;
+    const z = obs.z;
 
-    drawShadow(0, z, 40 + dive * 120, 0.45);
+    drawShadow(0, z, 28 + swing * 40, 0.55);
     drawIceGlow(0, z, obs);
 
-    const gripEnd = projectHeight(-half * f, z + 10, lift + 16);
-    const heel = projectHeight(half * f * 0.82, z, lift);
-    const toe = projectHeight(half * f + f * 14, z - 26, lift - 10);
-    if (!gripEnd || !heel || !toe) return;
-
     const pal = stickPalette(obs);
-    ctx.save();
-    ctx.globalAlpha = passAlpha(slip, heel.d);
-    ctx.lineCap = "round";
-    drawTipGlow(heel, pal, 1.6);
+    for (const side of [-1, 1]) {
+      const push = obs.ok ? slip * 1.5 : slip * 0.35;
+      const tipX = stickTipX(side, swing, push);
+      const tipZ = z + STICK.tipZOffset;
+      const tip = projectHeight(tipX, tipZ, STICK.tipHeight);
+      if (!tip) continue;
 
-    // Shaft across the lane.
-    ctx.strokeStyle = pal.shaft;
-    ctx.lineWidth = Math.min(NEAR_W_CAP, Math.max(3, (6 + dive * 3) * heel.k));
-    ctx.beginPath();
-    ctx.moveTo(gripEnd.sx, gripEnd.sy);
-    ctx.lineTo(heel.sx, heel.sy);
-    ctx.stroke();
+      const alpha = passAlpha(slip, tip.d);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      drawTipGlow(tip, pal, 1.3);
+      ctx.restore();
 
-    // Blade angled toward us.
-    ctx.strokeStyle = pal.blade;
-    ctx.lineWidth = Math.min(NEAR_W_CAP, Math.max(4, (8 + dive * 6) * heel.k));
-    ctx.beginPath();
-    ctx.moveTo(heel.sx, heel.sy);
-    ctx.lineTo(toe.sx, toe.sy);
-    ctx.stroke();
-
-    // Grip knob so the far end reads as a stick, not a bar.
-    ctx.fillStyle = pal.blade;
-    ctx.beginPath();
-    ctx.arc(gripEnd.sx, gripEnd.sy, Math.max(2.5, 5 * gripEnd.k), 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+      const sprite = stickSprite(true, side);
+      if (!drawTiltedStick(sprite, tipX, tipZ, side, swing, alpha, STICK.crossAppearDeg, STICK.crossStopDeg)) {
+        const gripX = side * (CORRIDOR.halfW * 1.45);
+        const grip = projectHeight(gripX, tipZ, 18);
+        if (grip) {
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.strokeStyle = pal.shaft;
+          ctx.lineWidth = Math.min(NEAR_W_CAP, Math.max(3, (6 + swing * 4) * tip.k));
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(grip.sx, grip.sy);
+          ctx.lineTo(tip.sx, tip.sy);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+    }
   }
 
   function drawParticles() {
@@ -2125,24 +2226,24 @@
   function drawSlitBody(slit) {
     // Letterbox: solid shell above and below, no rim anywhere.
     const bottom = slit.y + slit.h;
-    ctx.fillStyle = "#05080e";
+    ctx.fillStyle = "#14081f";
     ctx.fillRect(0, 0, W, slit.y);
     ctx.fillRect(0, bottom, W, H - bottom);
 
     // Cinematic falloff — the shell dissolves into the view instead of framing it.
     const topFade = Math.min(90, slit.h * 0.28);
     const topG = ctx.createLinearGradient(0, slit.y, 0, slit.y + topFade);
-    topG.addColorStop(0, "rgba(5,8,14,0.96)");
-    topG.addColorStop(0.35, "rgba(5,8,14,0.5)");
-    topG.addColorStop(1, "rgba(5,8,14,0)");
+    topG.addColorStop(0, "rgba(20,8,31,0.96)");
+    topG.addColorStop(0.35, "rgba(20,8,31,0.5)");
+    topG.addColorStop(1, "rgba(20,8,31,0)");
     ctx.fillStyle = topG;
     ctx.fillRect(0, slit.y, W, topFade);
 
     const botFade = Math.min(130, slit.h * 0.34);
     const botG = ctx.createLinearGradient(0, bottom - botFade, 0, bottom);
-    botG.addColorStop(0, "rgba(5,8,14,0)");
-    botG.addColorStop(0.5, "rgba(5,8,14,0.34)");
-    botG.addColorStop(1, "rgba(5,8,14,0.97)");
+    botG.addColorStop(0, "rgba(20,8,31,0)");
+    botG.addColorStop(0.5, "rgba(20,8,31,0.34)");
+    botG.addColorStop(1, "rgba(20,8,31,0.97)");
     ctx.fillStyle = botG;
     ctx.fillRect(0, bottom - botFade, W, botFade);
 
@@ -2174,15 +2275,15 @@
     };
   }
 
-  // Pulsing pointer from mid-screen down to the inertia bar.
+  // Pulsing pointer from mid-screen up to the speed readout.
   function drawGripArrow() {
-    if (!tutorPause || !tutorPause.pointGrip || !gripBarEl || phase !== "play") return;
-    const rect = gripBarEl.getBoundingClientRect();
+    if (!tutorPause || !tutorPause.pointGrip || !hudStatsEl || phase !== "play") return;
+    const rect = hudStatsEl.getBoundingClientRect();
     const canvasRect = canvas.getBoundingClientRect();
     const tx = rect.left + rect.width * 0.5 - canvasRect.left;
-    const ty = rect.top + rect.height * 0.5 - canvasRect.top;
+    const ty = rect.bottom - canvasRect.top + 6;
     const sx = W * 0.5;
-    const sy = H * 0.52;
+    const sy = H * 0.48;
     const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 220);
 
     ctx.save();
@@ -2192,22 +2293,21 @@
     ctx.lineCap = "round";
     ctx.beginPath();
     ctx.moveTo(sx, sy);
-    ctx.bezierCurveTo(sx, sy + (ty - sy) * 0.35, tx, ty - 70, tx, ty - 14);
+    ctx.bezierCurveTo(sx, sy - (sy - ty) * 0.35, tx, ty + 50, tx, ty + 14);
     ctx.stroke();
 
-    // Arrow head
     ctx.beginPath();
-    ctx.moveTo(tx, ty - 2);
-    ctx.lineTo(tx - 10, ty - 18);
-    ctx.lineTo(tx + 10, ty - 18);
+    ctx.moveTo(tx, ty + 2);
+    ctx.lineTo(tx - 10, ty + 18);
+    ctx.lineTo(tx + 10, ty + 18);
     ctx.closePath();
     ctx.fill();
 
     ctx.font = `700 13px ${CUE_FONT}`;
     ctx.textAlign = "center";
-    ctx.textBaseline = "bottom";
+    ctx.textBaseline = "top";
     ctx.fillStyle = `rgba(255, 220, 140, ${0.7 + 0.3 * pulse})`;
-    ctx.fillText("ИНЕРЦИЯ", tx, ty - 24);
+    ctx.fillText("СКОРОСТЬ", tx, ty + 22);
     ctx.restore();
   }
 
@@ -2319,12 +2419,14 @@
   function drawDamageFlash(slit) {
     if (damageFlash <= 0) return;
     const a = damageFlash * 0.45;
+    const cx = slit.x + slit.w / 2;
+    const cy = slit.y + slit.h / 2;
     const g = ctx.createRadialGradient(
-      slit.x + slit.w / 2,
-      slit.y + slit.h / 2,
+      cx,
+      cy,
       slit.h * 0.1,
-      slit.x + slit.w / 2,
-      slit.y + slit.h / 2,
+      cx,
+      cy,
       slit.w * 0.55
     );
     g.addColorStop(0, `rgba(255,40,30,${a * 0.15})`);
@@ -2333,6 +2435,14 @@
     slitPath(slit);
     ctx.fillStyle = g;
     ctx.fill();
+
+    if (imgReady(imgs.hit)) {
+      const size = Math.min(slit.w, slit.h) * (0.55 + 0.35 * damageFlash);
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, damageFlash * 0.95);
+      ctx.drawImage(imgs.hit, cx - size / 2, cy - size / 2, size, size);
+      ctx.restore();
+    }
   }
 
   // Looking from inside the puck: leaning and trembling move the view, not a disc.
@@ -2355,7 +2465,7 @@
     ctx.clearRect(0, 0, W, H);
 
     // Shell fill behind everything.
-    ctx.fillStyle = "#05080e";
+    ctx.fillStyle = "#14081f";
     ctx.fillRect(0, 0, W, H);
 
     const slit = slitRect();
@@ -2407,7 +2517,7 @@
   function loop(ts) {
     const dt = Math.min((ts - lastTs) / 1000, 0.05);
     lastTs = ts;
-    update(dt);
+    if (!paused) update(dt);
     render();
     requestAnimationFrame(loop);
   }
@@ -2415,6 +2525,7 @@
   // ---------- INPUT ----------
 
   function queueInput(code) {
+    if (paused) return;
     if (phase === "ready") {
       if (code === "brace") startRun();
       return;
@@ -2439,6 +2550,11 @@
 
   window.addEventListener("keydown", (e) => {
     if (e.repeat) return;
+    if (e.code === "Escape") {
+      e.preventDefault();
+      togglePause();
+      return;
+    }
     if (e.code === "KeyA" || e.code === "ArrowLeft") {
       queueInput("left");
     } else if (e.code === "KeyD" || e.code === "ArrowRight") {
@@ -2502,6 +2618,20 @@
     tutorAgainBtn.blur();
     startRun(true);
   });
+  if (pauseBtn) {
+    pauseBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      pauseBtn.blur();
+      togglePause();
+    });
+  }
+  if (resumeBtn) {
+    resumeBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      resumeBtn.blur();
+      setPaused(false);
+    });
+  }
   window.addEventListener("resize", resize);
 
   resetGame();

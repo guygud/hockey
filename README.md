@@ -9,6 +9,7 @@
 | Удар с вертушки | [`/spinner/`](spinner/) |
 | Симулятор шайбы | [`/puck/`](puck/) |
 | Свои и чужие | [`/dodge/`](dodge/) |
+| Свои и чужие — дизайн | [`/dodge-design/`](dodge-design/) |
 | Атака на бите | [`/rhythm/`](rhythm/) |
 | Распасовка | [`/pass/`](pass/) |
 
@@ -22,6 +23,7 @@ python3 -m http.server 8765
 - Вертушка: [http://localhost:8765/spinner/](http://localhost:8765/spinner/)
 - Симулятор шайбы: [http://localhost:8765/puck/](http://localhost:8765/puck/)
 - Свои и чужие: [http://localhost:8765/dodge/](http://localhost:8765/dodge/)
+- Свои и чужие — дизайн: [http://localhost:8765/dodge-design/](http://localhost:8765/dodge-design/)
 - Атака на бите: [http://localhost:8765/rhythm/](http://localhost:8765/rhythm/)
 - Распасовка: [http://localhost:8765/pass/](http://localhost:8765/pass/)
 
@@ -33,6 +35,7 @@ Settings → Pages → branch `main` / root:
 - [https://guygud.github.io/hockey/spinner/](https://guygud.github.io/hockey/spinner/) — вертушка
 - [https://guygud.github.io/hockey/puck/](https://guygud.github.io/hockey/puck/) — симулятор шайбы
 - [https://guygud.github.io/hockey/dodge/](https://guygud.github.io/hockey/dodge/) — свои и чужие
+- [https://guygud.github.io/hockey/dodge-design/](https://guygud.github.io/hockey/dodge-design/) — свои и чужие (дизайн)
 - [https://guygud.github.io/hockey/rhythm/](https://guygud.github.io/hockey/rhythm/) — атака на бите
 - [https://guygud.github.io/hockey/pass/](https://guygud.github.io/hockey/pass/) — распасовка
 
@@ -43,7 +46,9 @@ index.html      — разводящая страница
 hub.css         — стили разводящей
 spinner/        — «Удар с вертушки»
 puck/           — «Симулятор шайбы»
-dodge/          — «Свои и чужие» (шайба с вражескими клюшками)
+dodge/          — «Свои и чужие» (старая версия)
+dodge-design/   — «Свои и чужие» (неоновый дизайн)
+assets/         — общие ассеты для dodge-design
 rhythm/         — «Атака на бите»
 pass/           — «Распасовка»
 ```
