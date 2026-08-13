@@ -57,6 +57,99 @@
     spring: 22,
     damp: 7,
   };
+  // Логотипы на льду — как щит на красной линии: лежат на плоскости и едут с ареной.
+  const ICE_MARKS = {
+    step: 520,
+    size: 78,
+    emojis: ["🏒", "⭐", "❄️", "🔥", "⚡", "💎", "👑", "🎯", "💙", "🧊", "🏆", "✨"],
+  };
+  // Декор: игроки проезжают по бортам и не участвуют в правилах.
+  const SKATERS = {
+    max: 5,
+    spawnGap: 1.15,
+    xMin: 132,
+    xMax: 205,
+  };
+  const HEAT = { full: 6, shake: 0.9, lines: 0.45, pitch: 0.22, vignette: 0.12 };
+  const DYN = { fovPull: 0.07, dip: 4, bob: 0.8 };
+  const BEAT = { kick: 0.05, hat: 0.022, pulse: 0.35 };
+  const ROUND_NEUTRAL = {
+    id: "clean",
+    name: "РАЗМИНКА",
+    bpm: 0,
+    emojis: ICE_MARKS.emojis,
+    theme: {
+      shell: "#14081f",
+      strip: ["#12081f", "#2a1050", "#6b3aa8"],
+      floor: ["#5a2d8a", "#7a45b0", "#3d1866"],
+      tint: [0.42, 0.35],
+      lane: ["rgba(255,210,255,0.07)", "rgba(255,220,120,0.55)"],
+      lines: "235,215,255",
+    },
+    mods: {},
+  };
+  const ROUNDS = [
+    {
+      id: "night",
+      name: "НОЧНАЯ СМЕНА",
+      bpm: 118,
+      emojis: ["❄️", "🌙", "🧊", "⭐"],
+      theme: {
+        shell: "#0a1020",
+        strip: ["#080c18", "#122040", "#1a3a6a"],
+        floor: ["#1a2a50", "#243868", "#0e1830"],
+        tint: [0.5, 0.22],
+        lane: ["rgba(140,190,255,0.07)", "rgba(160,210,255,0.5)"],
+        lines: "180,210,255",
+      },
+      mods: { gapMul: 1.1, winMul: 1.1, foeMul: 0.9 },
+    },
+    {
+      id: "blitz",
+      name: "БЛИЦ",
+      bpm: 140,
+      emojis: ["⚡", "🎯", "🏒"],
+      theme: {
+        shell: "#061818",
+        strip: ["#041414", "#0a3030", "#147070"],
+        floor: ["#0e3a3a", "#1a5858", "#082828"],
+        tint: [0.38, 0.4],
+        lane: ["rgba(80,255,230,0.08)", "rgba(90,255,220,0.55)"],
+        lines: "140,255,240",
+      },
+      mods: { gapMul: 0.82, winMul: 1.15, distMul: 0.8 },
+    },
+    {
+      id: "forge",
+      name: "ПЛАВКА",
+      bpm: 128,
+      emojis: ["🔥", "🏆", "💥"],
+      theme: {
+        shell: "#1a0808",
+        strip: ["#180606", "#4a1810", "#8a3020"],
+        floor: ["#5a2018", "#7a3020", "#2a0c0c"],
+        tint: [0.36, 0.42],
+        lane: ["rgba(255,180,120,0.08)", "rgba(255,160,80,0.55)"],
+        lines: "255,200,150",
+      },
+      mods: { foeMul: 1.25, drainMul: 1.1, crossMul: 1.3 },
+    },
+    {
+      id: "long",
+      name: "ДОЛГИЙ ПУТЬ",
+      bpm: 112,
+      emojis: ["💎", "👑", "✨"],
+      theme: {
+        shell: "#0c0818",
+        strip: ["#0a0616", "#1a1040", "#3a2080"],
+        floor: ["#241850", "#382870", "#140c30"],
+        tint: [0.46, 0.28],
+        lane: ["rgba(180,160,255,0.07)", "rgba(200,180,255,0.5)"],
+        lines: "200,190,255",
+      },
+      mods: { distMul: 1.25, gapMul: 1.15, drainMul: 0.9 },
+    },
+  ];
   const RUN_DIST = 4000;
   // Goal counts at the crease; last stick stays well before it.
   const CREASE_BACK = 200;
@@ -113,6 +206,10 @@
   const GOOD = 0.32;
   const INTERVAL_START = 1.6;
   const INTERVAL_END = 1.05;
+  // Spawn distance uses a reference speed, not current vz — otherwise a faster
+  // puck just places the stick farther away and the approach time never changes.
+  const SPAWN_REF = 300;
+  const SPAWN_MIN_LEAD = 560;
   // Every attempt in the same life bank ramps up, then plateaus at MAX_LEVEL.
   const MAX_LEVEL = 8;
   const DRAIN_RAMP = 0.55;
@@ -176,6 +273,14 @@
   let hitFlash;
   let hitFlashPerfect;
   let boostFx;
+  let heat = 0;
+  let heatTarget = 0;
+  let heatStreak = 0;
+  let beatT = 0;
+  let beatIdx = 0;
+  let beatPulse = 0;
+  let activeRound;
+  let roundDeck = [];
   // 0 = eye inside the puck, 1 = chase cam outside. Cinema drives this.
   let outside;
   let cinema; // { mode, t, ... } | null
@@ -183,6 +288,9 @@
   let lastSpawnZ;
   let finalSpawned;
   let sideRedSpawned;
+  let iceMarks;
+  let skaters;
+  let skaterTimer;
   let gradeFlashTimer;
   let gradeFlashText;
   let gradeFlashClass;
@@ -212,6 +320,7 @@
   const hudStatsEl = document.querySelector(".hud-stats");
   const levelNumEl = document.getElementById("level-num");
   const speedEl = document.getElementById("speed");
+  const roundBadgeEl = document.getElementById("round-badge");
 
   // Neon art pack — paths are relative to dodge/index.html.
   const ASSET_SRC = {
@@ -228,6 +337,7 @@
     borderTop: "../assets/border-top.png",
     signal: "../assets/signal.svg",
     hit: "../assets/hit.png",
+    konki: "../assets/konki.png",
   };
   const imgs = {};
   for (const [key, src] of Object.entries(ASSET_SRC)) {
@@ -237,6 +347,30 @@
   }
   function imgReady(img) {
     return !!(img && img.complete && img.naturalWidth > 0);
+  }
+
+  let konkiCut = null;
+  function konkiSprite() {
+    if (konkiCut) return konkiCut;
+    if (!imgReady(imgs.konki)) return null;
+    const src = imgs.konki;
+    try {
+      const c = document.createElement("canvas");
+      c.width = src.naturalWidth;
+      c.height = src.naturalHeight;
+      const x = c.getContext("2d");
+      x.drawImage(src, 0, 0);
+      const data = x.getImageData(0, 0, c.width, c.height);
+      const p = data.data;
+      for (let i = 0; i < p.length; i += 4) {
+        if (p[i] < 22 && p[i + 1] < 22 && p[i + 2] < 22) p[i + 3] = 0;
+      }
+      x.putImageData(data, 0, 0);
+      konkiCut = c;
+    } catch (err) {
+      konkiCut = src;
+    }
+    return konkiCut;
   }
 
   // ---------- AUDIO ----------
@@ -294,21 +428,27 @@
     src.start(t);
   }
 
+  function heatPitch() {
+    return 1 + (heat || 0) * HEAT.pitch;
+  }
+
   function sfxHit(perfect) {
+    const p = heatPitch();
     if (perfect) {
-      tone(760, 1500, 0.1, 0.16, "square");
-      tone(380, 620, 0.16, 0.1, "triangle");
-      swish(0.22, 0.16, 2600, 0.9);
+      tone(760 * p, 1500 * p, 0.1, 0.16, "square");
+      tone(380 * p, 620 * p, 0.16, 0.1, "triangle");
+      swish(0.22, 0.16, 2600 * p, 0.9);
     } else {
-      tone(480, 800, 0.09, 0.11, "square");
-      swish(0.18, 0.11, 1800, 0.9);
+      tone(480 * p, 800 * p, 0.09, 0.11, "square");
+      swish(0.18, 0.11, 1800 * p, 0.9);
     }
   }
 
   // A dodge is air, not contact: the blade goes by without a click.
   function sfxDodge(perfect) {
-    swish(perfect ? 0.3 : 0.24, perfect ? 0.16 : 0.11, perfect ? 1500 : 1100, 0.55);
-    tone(300, 190, 0.16, perfect ? 0.07 : 0.05, "sine");
+    const p = heatPitch();
+    swish(perfect ? 0.3 : 0.24, perfect ? 0.16 : 0.11, (perfect ? 1500 : 1100) * p, 0.55);
+    tone(300 * p, 190 * p, 0.16, perfect ? 0.07 : 0.05, "sine");
   }
 
   function sfxFail() {
@@ -353,7 +493,7 @@
   function pickSide() {
     const ease = earlyEase();
     // Almost no frontal sticks on L0, few on L1 — side passes/dodges first.
-    const frontal = 0.2 * (1 - 0.9 * ease);
+    const frontal = 0.2 * (1 - 0.9 * ease) * (mods().crossMul || 1);
     const r = Math.random();
     if (r < (1 - frontal) * 0.5) return -1;
     if (r < 1 - frontal) return 1;
@@ -364,7 +504,7 @@
   // and the foe share grows with the difficulty level.
   function pickFoe(side) {
     if (side === 0) return true;
-    const share = (FOE_SHARE + FOE_RAMP * levelMix()) * (1 - 0.85 * earlyEase());
+    const share = (FOE_SHARE + FOE_RAMP * levelMix()) * (1 - 0.85 * earlyEase()) * (mods().foeMul || 1);
     return Math.random() < share;
   }
 
@@ -429,12 +569,33 @@
     { kind: "practice" },
   ];
 
+  function seedIceMarks() {
+    const marks = [];
+    const pack = (activeRound && activeRound.emojis) || ICE_MARKS.emojis;
+    const startZ = 480;
+    const endZ = runDist - 70;
+    const span = Math.max(240, endZ - startZ);
+    const count = Math.max(7, Math.round(span / ICE_MARKS.step));
+    // Больше у бортов, чем в центре: 0, ±половина, ±край.
+    const lanes = [0, -0.58, 0.58, -0.92, 0.92];
+    for (let i = 0; i < count; i++) {
+      const t = (i + 0.45 + hash01(i + 19) * 0.1) / count;
+      marks.push({
+        x: CORRIDOR.halfW * lanes[i % lanes.length] + (hash01(i + 3) - 0.5) * 16,
+        z: startZ + span * t,
+        size: ICE_MARKS.size * (0.9 + hash01(i + 7) * 0.35),
+        emoji: pack[i % pack.length],
+      });
+    }
+    return marks;
+  }
+
   function nextSpawn() {
     const need = Math.max(0, MIN_SIDE_REDS - sideRedSpawned);
     if (need > 0) {
       const finalZ = runDist - FINAL_STICK_BACK;
       const minApproach = Math.max(400, Math.max(puck.vz, SPEED_MIN) * 1.3);
-      const lead = Math.max(puck.vz, SPEED_MIN) * spawnInterval();
+      const lead = spawnLead();
       const nextZ = Math.max(lastSpawnZ + 80, puck.z + lead);
       const room = finalZ - minApproach - nextZ;
       const slotsAfter = Math.max(0, Math.floor(room / Math.max(80, lead)));
@@ -447,7 +608,9 @@
       }
     }
     const side = pickSide();
-    return { side, foe: pickFoe(side) };
+    const foe = pickFoe(side);
+    if (!foe) return { side: blueSide(), foe: false };
+    return { side, foe };
   }
 
   // What the player must press: take a team pass on its own side, swerve away
@@ -485,11 +648,36 @@
     return Math.min(level, MAX_LEVEL) / MAX_LEVEL;
   }
 
+  function mods() {
+    return (activeRound && activeRound.mods) || {};
+  }
+
+  function theme() {
+    return (activeRound && activeRound.theme) || ROUND_NEUTRAL.theme;
+  }
+
+  function pickRound() {
+    if (roundDeck.length === 0) {
+      roundDeck = ROUNDS.slice().sort(() => Math.random() - 0.5);
+      if (activeRound && roundDeck[0] && roundDeck[0].id === activeRound.id && roundDeck.length > 1) {
+        roundDeck.push(roundDeck.shift());
+      }
+    }
+    return roundDeck.shift();
+  }
+
+  function peekNextRoundName() {
+    if (tutorOn) return null;
+    if (roundDeck.length > 0) return roundDeck[0].name;
+    const next = ROUNDS.find((r) => !activeRound || r.id !== activeRound.id);
+    return next ? next.name : null;
+  }
+
   function drainRate() {
     // Scripted lesson freezes the bar so the demo hit is the only visible drop.
     if (tutorOn && tutorMode !== "practice") return 0;
     const ease = earlyEase();
-    return MOM_DRAIN * (1 + DRAIN_RAMP * levelMix()) * (1 - 0.8 * ease);
+    return MOM_DRAIN * (1 + DRAIN_RAMP * levelMix()) * (1 - 0.8 * ease) * (mods().drainMul || 1);
   }
 
   function perfectWin() {
@@ -509,10 +697,11 @@
   function timingBounds(obs) {
     const mul = winMul(obs);
     const ease = earlyEase();
+    const win = mods().winMul || 1;
     return {
       open: WINDOW_OPEN * (1 + 0.45 * ease),
-      perfect: perfectWin() * mul,
-      good: goodWin() * mul,
+      perfect: perfectWin() * mul * win,
+      good: goodWin() * mul * win,
     };
   }
 
@@ -548,7 +737,14 @@
     if (tutorOn && tutorMode === "practice") return TUTOR_PRACTICE_GAP;
     const t = Math.max(0, Math.min(1, puck.z / runDist));
     const base = INTERVAL_START + (INTERVAL_END - INTERVAL_START) * t;
-    return base * (1 - GAP_RAMP * levelMix()) * (1 + 1.1 * earlyEase());
+    return base * (1 - GAP_RAMP * levelMix()) * (1 + 1.1 * earlyEase()) * (mods().gapMul || 1);
+  }
+
+  function spawnLead() {
+    const raw = spawnInterval();
+    const len = beatLen();
+    const gap = len > 0 ? Math.max(2, Math.round(raw / len)) * len : raw;
+    return Math.max(SPAWN_MIN_LEAD, SPAWN_REF * gap);
   }
 
   function resolveSpawnSide(side) {
@@ -600,7 +796,7 @@
     if (finalSpawned) return;
 
     const finalZ = runDist - FINAL_STICK_BACK;
-    const lead = Math.max(puck.vz, SPEED_MIN) * spawnInterval();
+    const lead = spawnLead();
     const nextZ = Math.max(lastSpawnZ + 80, puck.z + lead);
     // Keep the corridor before the crease clear — the last stick must land
     // before the goal cam kicks in.
@@ -617,7 +813,7 @@
         }
       }
       // Последняя — всегда свой пас: приняв его, выкатываемся ровно на ворота.
-      obstacles.push(makeObstacle(finalZ, resolveSpawnSide(null), false, { final: true }));
+      obstacles.push(makeObstacle(finalZ, blueSide(), false, { final: true }));
       lastSpawnZ = finalZ;
       finalSpawned = true;
       return;
@@ -649,15 +845,20 @@
     } else {
       attempt = 1;
       level = 0;
+      roundDeck = [];
     }
 
-    runDist = tutorOn ? TUTOR_DIST : RUN_DIST;
+    activeRound = tutorOn ? ROUND_NEUTRAL : pickRound();
+    runDist = tutorOn ? TUTOR_DIST : Math.round(RUN_DIST * (mods().distMul || 1));
     mom = MOM_START;
     if (!keepStreak) streak = 0;
     if (!keepLives) lives = MAX_LIVES;
     puck = createPuck();
     obstacles = [];
     particles = [];
+    iceMarks = seedIceMarks();
+    skaters = [];
+    skaterTimer = 0;
     tilt = 0;
     turn = 0;
     turnVel = 0;
@@ -678,6 +879,12 @@
     hitFlash = 0;
     hitFlashPerfect = false;
     boostFx = 0;
+    heat = 0;
+    heatTarget = 0;
+    heatStreak = 0;
+    beatT = 0;
+    beatIdx = 0;
+    beatPulse = 0;
     netFlash = 0;
     outside = 1;
     cinema = { mode: "intro", t: 0, whoosh: false };
@@ -713,7 +920,6 @@
     reportAltBtn.hidden = true;
     braceFlash.hidden = true;
     braceFlash.className = "";
-    maybeSpawnObstacles();
     updateHud();
   }
 
@@ -751,6 +957,12 @@
     if (speedEl) {
       speedEl.textContent = (Math.max(puck.vz, 0) * SPEED_KMH_SCALE).toFixed(1);
     }
+    if (roundBadgeEl) {
+      const show = !tutorOn && !!activeRound && activeRound.id !== "clean";
+      roundBadgeEl.hidden = !show;
+      if (show) roundBadgeEl.textContent = activeRound.name;
+    }
+    document.body.classList.toggle("heat-hot", (heat || 0) > 0.66);
     if (pauseBtn) {
       const canPause = phase === "play" && !cinema && !tutorPause;
       pauseBtn.hidden = !canPause && !paused;
@@ -799,13 +1011,60 @@
     updateHud();
   }
 
+  function speedMix() {
+    if (!puck) return 0;
+    return Math.max(0, Math.min(1, (puck.vz - SPEED_MIN) / (SPEED_MAX - SPEED_MIN)));
+  }
+
+  function camFocal() {
+    return CAM.focal * (1 - DYN.fovPull * speedMix() * (1 - easeInOut(outside)));
+  }
+
+  function pushMix() {
+    if (!puck || !runDist) return 0;
+    return Math.max(0, Math.min(1, (puck.z / runDist - 0.7) / 0.3));
+  }
+
+  function beatLen() {
+    const bpm = activeRound && activeRound.bpm ? activeRound.bpm * (1 + 0.18 * pushMix()) : 0;
+    return bpm > 0 ? 60 / bpm : 0;
+  }
+
+  function tickBeat(dt) {
+    const len = beatLen();
+    if (len <= 0) return;
+    beatT += dt;
+    while (beatT >= len) {
+      beatT -= len;
+      beatIdx += 1;
+      if (beatIdx % 4 === 0) tone(92, 54, 0.12, BEAT.kick, "sine");
+      else swish(0.03, BEAT.hat, 6200, 2.2);
+      if (pushMix() > 0.2 && beatIdx % 2 === 0) tone(140, 110, 0.1, BEAT.kick * 0.7, "triangle");
+      beatPulse = 1;
+    }
+  }
+
+  function hexRgb(hex) {
+    const h = (hex || "#14081f").replace("#", "");
+    return {
+      r: parseInt(h.slice(0, 2), 16),
+      g: parseInt(h.slice(2, 4), 16),
+      b: parseInt(h.slice(4, 6), 16),
+    };
+  }
+
+  function shellRgba(a) {
+    const c = hexRgb(theme().shell);
+    return `rgba(${c.r},${c.g},${c.b},${a})`;
+  }
+
   // outside 0 = eye inside the puck, 1 = chase cam over the ice.
   function camRig() {
     const e = easeInOut(outside);
     return {
       back: camZ + CAM_OUT.back * e,
       x: CAM_OUT.x * e,
-      h: CAM.height + (CAM_OUT.height - CAM.height) * e + camBoost,
+      h: CAM.height + (CAM_OUT.height - CAM.height) * e + camBoost - DYN.dip * speedMix() * (1 - e),
     };
   }
 
@@ -825,9 +1084,25 @@
   function turnShiftPx() {
     return -turn * TURN.iceShift * turnMix();
   }
+  // Текстуры льда и бортов шире экрана на весь возможный доворот, иначе виден шов.
+  function arenaCover() {
+    const shift = turnShiftPx();
+    const pad = Math.max(W * 0.3, TURN.iceShift * TURN.maxSteps + 80);
+    return { x: shift - pad, w: W + pad * 2, shift };
+  }
   function headingAway(side) {
     // Красная слева уводит вправо, справа — влево: нос уходит с линии ворот.
     return side < 0 ? 1 : -1;
+  }
+  // Сторона, куда нас уже увело от ворот. Синяя должна быть там же.
+  function turnedSide() {
+    const heading = Math.abs(turnTarget) >= Math.abs(turn) ? turnTarget : turn;
+    if (heading > 0.2) return 1;
+    if (heading < -0.2) return -1;
+    return 0;
+  }
+  function blueSide() {
+    return turnedSide() || resolveSpawnSide(null);
   }
 
   function project(x, z, withTurn) {
@@ -840,7 +1115,7 @@
     const rx = dx * c - dz * s;
     const d = dx * s + dz * c;
     if (d < CAM.near || d > CAM.far) return null;
-    const k = CAM.focal / d;
+    const k = camFocal() / d;
     return {
       sx: W / 2 + rx * k,
       sy: H * CAM.horizonFrac + rig.h * k,
@@ -971,6 +1246,8 @@
     }
     runStats[perfect ? "perfect" : "good"] += 1;
     runStats[dodged ? "dodges" : "passes"] += 1;
+    heatStreak += 1;
+    heatTarget = Math.min(1, heatStreak / HEAT.full);
 
     // A pass is contact: recoil and sparks. A dodge is a swerve: it throws the
     // view sideways instead, with only ice spray to show for it.
@@ -1025,6 +1302,8 @@
       runStats.missed += 1;
     }
 
+    heatStreak = 0;
+    heatTarget = 0;
     tremble = 1;
     damageFlash = 1;
     camZVel -= 60;
@@ -1165,6 +1444,39 @@
     }
   }
 
+  function spawnSkater() {
+    if (!skaters || skaters.length >= SKATERS.max || !puck) return;
+    const nearCount = skaters.filter((s) => s.near).length;
+    const farCount = skaters.filter((s) => !s.near).length;
+    const near = nearCount < farCount;
+    const zOff = near ? 34 + Math.random() * 36 : 150 + Math.random() * 190;
+    skaters.push({
+      x: near ? -46 : -170,
+      zOff,
+      vx: near ? 340 + Math.random() * 90 : 440 + Math.random() * 180,
+      near,
+      stride: Math.random() * Math.PI * 2,
+    });
+  }
+
+  function updateSkaters(dt) {
+    if (!skaters) skaters = [];
+    if (phase === "play") {
+      skaterTimer -= dt;
+      if (skaterTimer <= 0) {
+        spawnSkater();
+        skaterTimer = SKATERS.spawnGap + Math.random() * 1.1;
+      }
+    }
+    for (let i = skaters.length - 1; i >= 0; i--) {
+      const s = skaters[i];
+      s.x += s.vx * dt;
+      s.stride += dt * 10;
+      const limit = s.near ? 52 : 170;
+      if (s.x > limit) skaters.splice(i, 1);
+    }
+  }
+
   function nudgeLook(code) {
     if (code === "left") {
       glanceX = -GLANCE_X;
@@ -1183,6 +1495,8 @@
   }
 
   function updateFx(dt) {
+    heat += ((heatTarget || 0) - (heat || 0)) * Math.min(1, dt * 6);
+    beatPulse = Math.max(0, (beatPulse || 0) - dt * 4);
     tilt *= 0.88;
     turnVel += ((turnTarget - turn) * TURN.spring - turnVel * TURN.damp) * dt;
     turn += turnVel * dt;
@@ -1250,14 +1564,17 @@
       ["Не туда / пропустил", `${runStats.wrong} / ${runStats.missed}`],
       ["Жизни · серия", `${lives} · ${streak}`],
       ["Попытка · сложность", `${attempt} · ${Math.round(levelMix() * 100)}%`],
+      ["Заезд", activeRound && activeRound.name ? activeRound.name : "—"],
     ];
   }
 
   function nextAttemptNote() {
-    if (level >= MAX_LEVEL) return "Сложность на максимуме: держись.";
-    if (level <= 0) return "Первые два заезда — учебные: больше своих, шире окно, спокойный темп.";
-    if (level <= 1) return "Ещё один мягкий заезд — дальше темп и чужие клюшки подтянутся.";
-    return "Следующая попытка: чужих клюшек больше, окно уже, инерция тает быстрее.";
+    const nextName = peekNextRoundName();
+    const nextBit = nextName ? ` Следующий заезд: ${nextName}.` : "";
+    if (level >= MAX_LEVEL) return `Сложность на максимуме: держись.${nextBit}`;
+    if (level <= 0) return `Первые два заезда — учебные: больше своих, шире окно, спокойный темп.${nextBit}`;
+    if (level <= 1) return `Ещё один мягкий заезд — дальше темп и чужие клюшки подтянутся.${nextBit}`;
+    return `Следующая попытка: чужих клюшек больше, окно уже, инерция тает быстрее.${nextBit}`;
   }
 
   // Round always ends on a report the player dismisses — never auto-restarts.
@@ -1746,9 +2063,9 @@
     // Fly-in: puck keeps rolling, but coaching and input wait until we're inside.
     if (cine === "intro") {
       updatePuck(dt);
-      maybeSpawnObstacles();
       updateObstacles();
       updateParticles(dt);
+      updateSkaters(dt);
       updateFx(dt);
       updateHud();
       return;
@@ -1770,6 +2087,8 @@
     maybeSpawnObstacles();
     updateObstacles();
     updateParticles(dt);
+    updateSkaters(dt);
+    tickBeat(dt);
     updateFx(dt);
 
     // Goal counts at the crease — the fly-out shows the rest into the net.
@@ -1786,27 +2105,29 @@
     const horizon = H * CAM.horizonFrac;
     const top = horizon - SLIT.topAboveHorizon - 60;
     const stripH = horizon - top + 2;
+    const pal = theme();
     const g = ctx.createLinearGradient(0, top, 0, horizon);
-    g.addColorStop(0, "#12081f");
-    g.addColorStop(0.45, "#2a1050");
-    g.addColorStop(1, "#6b3aa8");
+    g.addColorStop(0, pal.strip[0]);
+    g.addColorStop(0.45, pal.strip[1]);
+    g.addColorStop(1, pal.strip[2]);
     ctx.fillStyle = g;
-    ctx.fillRect(0, top, W, stripH);
+    const cover = arenaCover();
+    ctx.fillRect(cover.x, top, cover.w, stripH);
 
     // Panel wall behind the net, then the curved board rail on top.
-    const shift = turnShiftPx();
+    const boardA = 0.85 + 0.15 * pushMix();
     if (imgReady(imgs.borderTop)) {
       const wallH = Math.max(40, Math.min(110, SLIT.topAboveHorizon * 0.7));
       ctx.save();
-      ctx.globalAlpha = 0.95;
-      ctx.drawImage(imgs.borderTop, shift - W * 0.08, horizon - wallH * 0.92, W * 1.16, wallH);
+      ctx.globalAlpha = 0.95 * boardA;
+      ctx.drawImage(imgs.borderTop, cover.x, horizon - wallH * 0.92, cover.w, wallH);
       ctx.restore();
     }
     if (imgReady(imgs.board)) {
       const boardH = Math.max(28, Math.min(90, SLIT.topAboveHorizon * 0.55));
       ctx.save();
-      ctx.globalAlpha = 0.96;
-      ctx.drawImage(imgs.board, shift - W * 0.12, horizon - boardH * 0.72, W * 1.24, boardH);
+      ctx.globalAlpha = 0.96 * boardA;
+      ctx.drawImage(imgs.board, cover.x, horizon - boardH * 0.72, cover.w, boardH);
       ctx.restore();
     } else if (!imgReady(imgs.borderTop)) {
       ctx.strokeStyle = "rgba(250, 180, 255, 0.35)";
@@ -1825,35 +2146,35 @@
     const iceH = H - horizon + 24;
 
     // Fallback underpaint if textures have not loaded yet.
+    const pal = theme();
     const g = ctx.createLinearGradient(0, horizon, 0, H);
-    g.addColorStop(0, "#5a2d8a");
-    g.addColorStop(0.35, "#7a45b0");
-    g.addColorStop(1, "#3d1866");
+    g.addColorStop(0, pal.floor[0]);
+    g.addColorStop(0.35, pal.floor[1]);
+    g.addColorStop(1, pal.floor[2]);
     ctx.fillStyle = g;
-    ctx.fillRect(0, horizon, W, H - horizon);
+    ctx.fillRect(0, horizon, W, H - horizon + 24);
 
-    const iceX = turnShiftPx() - W * 0.08;
-    const iceW = W * 1.16;
+    // Освещение льда — один слой на весь кадр. Сдвиг даёт шов, поэтому
+    // доворот оставляем воротам, коридору и эмодзи на плоскости.
     if (imgReady(imgs.ice)) {
       ctx.save();
-      ctx.globalAlpha = 0.97;
-      ctx.drawImage(imgs.ice, iceX, iceY, iceW, iceH);
+      ctx.globalAlpha = 1;
+      ctx.drawImage(imgs.ice, 0, iceY, W, iceH);
       ctx.restore();
     }
 
-    // Extra purple tint / banding marks on the ice.
     if (imgReady(imgs.iceColor)) {
       ctx.save();
-      ctx.globalAlpha = 0.42;
+      ctx.globalAlpha = pal.tint[0];
       ctx.globalCompositeOperation = "multiply";
-      ctx.drawImage(imgs.iceColor, iceX, iceY, iceW, iceH);
+      ctx.drawImage(imgs.iceColor, 0, iceY, W, iceH);
       ctx.restore();
     }
     if (imgReady(imgs.iceColor2)) {
       ctx.save();
-      ctx.globalAlpha = 0.35;
+      ctx.globalAlpha = pal.tint[1];
       ctx.globalCompositeOperation = "screen";
-      ctx.drawImage(imgs.iceColor2, iceX, iceY, iceW, iceH);
+      ctx.drawImage(imgs.iceColor2, 0, iceY, W, iceH);
       ctx.restore();
     }
 
@@ -1864,13 +2185,69 @@
       const z = start + i * CORRIDOR.ribStep;
       const p = project(0, z, true);
       if (!p) continue;
-      const alpha = Math.max(0.03, 0.22 - i * 0.004);
+      const alpha = Math.max(0.03, 0.22 - i * 0.004) * (0.8 + 0.5 * speedMix());
       ctx.strokeStyle = `rgba(255,230,255,${alpha})`;
       ctx.lineWidth = Math.max(1, p.k * 1.2);
       ctx.beginPath();
       ctx.moveTo(0, p.sy);
       ctx.lineTo(W, p.sy);
       ctx.stroke();
+    }
+  }
+
+  // Эмодзи вморожены в лёд: четыре угла на плоскости, едут и крутятся с ареной.
+  function drawIceMarks() {
+    if (!iceMarks || iceMarks.length === 0) return;
+    const fontPx = 32;
+    const half = fontPx * 0.5;
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `${fontPx}px "Apple Color Emoji","Segoe UI Emoji",sans-serif`;
+    const sorted = iceMarks
+      .filter((m) => m.z > puck.z - 50)
+      .sort((a, b) => b.z - a.z);
+    for (const mark of sorted) {
+      const c = project(mark.x, mark.z, true);
+      const r = project(mark.x + mark.size, mark.z, true);
+      const f = project(mark.x, mark.z + mark.size, true);
+      if (!c || !r || !f) continue;
+      const sx = r.sx - c.sx;
+      const sy = r.sy - c.sy;
+      const fx = f.sx - c.sx;
+      const fy = f.sy - c.sy;
+      if (Math.hypot(sx, sy) < 2 && Math.hypot(fx, fy) < 2) continue;
+      const near = Math.max(0, Math.min(1, 1 - (mark.z - puck.z) / 900));
+      ctx.save();
+      ctx.globalAlpha = 0.38 + near * 0.22;
+      ctx.translate(c.sx, c.sy);
+      ctx.transform(sx / half, sy / half, fx / half, fy / half, 0, 0);
+      ctx.fillText(mark.emoji, 0, 0);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  function drawSkaters() {
+    const sprite = konkiSprite();
+    if (!sprite || !skaters || skaters.length === 0 || !puck) return;
+    const ratio = sprite.height / sprite.width;
+    const blade = 0.75;
+    const sorted = [...skaters].sort((a, b) => b.zOff - a.zOff);
+    for (const s of sorted) {
+      const p = project(s.x, puck.z + s.zOff, true);
+      if (!p) continue;
+      const w = s.near
+        ? W * 1.08
+        : Math.min(W * 0.34, Math.max(88, 230 * p.k));
+      const h = w * ratio;
+      if (p.sx + w / 2 < -20 || p.sx - w / 2 > W + 20) continue;
+      const fade = Math.max(0.25, Math.min(1, (p.sx + w / 2) / 80, (W + w / 2 - p.sx) / 80));
+      ctx.save();
+      ctx.globalAlpha = (s.near ? 0.96 : 0.92) * fade;
+      ctx.translate(p.sx, p.sy);
+      ctx.drawImage(sprite, -w / 2, -h * blade, w, h);
+      ctx.restore();
     }
   }
 
@@ -1884,7 +2261,8 @@
     const nearR = project(CORRIDOR.halfW, nearZ, true);
     if (!farL || !farR || !nearL || !nearR) return;
 
-    ctx.fillStyle = "rgba(255, 210, 255, 0.07)";
+    const pal = theme();
+    ctx.fillStyle = pal.lane[0];
     ctx.beginPath();
     ctx.moveTo(farL.sx, farL.sy);
     ctx.lineTo(farR.sx, farR.sy);
@@ -1893,7 +2271,7 @@
     ctx.closePath();
     ctx.fill();
 
-    ctx.strokeStyle = "rgba(255, 220, 120, 0.55)";
+    ctx.strokeStyle = pal.lane[1];
     ctx.lineWidth = 2.5;
     for (const [a, b] of [[farL, nearL], [farR, nearR]]) {
       ctx.beginPath();
@@ -2313,7 +2691,7 @@
   function drawSpeedLines() {
     if (outside > 0.5) return;
     const drive = Math.max(0, Math.min(1, (mom - SPEED_LINES.minMom) / (1 - SPEED_LINES.minMom)));
-    const load = Math.min(1, drive + boostFx * 0.8);
+    const load = Math.min(1, drive + boostFx * 0.8 + (heat || 0) * HEAT.lines + (beatPulse || 0) * BEAT.pulse * 0.15 + pushMix() * 0.2);
     if (load <= 0.02) return;
 
     const cx = W / 2;
@@ -2334,7 +2712,7 @@
       if (a <= 0.01) continue;
       const dx = Math.cos(ang);
       const dy = Math.sin(ang) * 0.45;
-      ctx.strokeStyle = `rgba(235,215,255,${a})`;
+      ctx.strokeStyle = `rgba(${theme().lines},${a})`;
       ctx.lineWidth = 1 + 2.2 * load * seed;
       ctx.beginPath();
       ctx.moveTo(cx + dx * r0, cy + dy * r0);
@@ -2396,7 +2774,7 @@
     ctx.beginPath();
     ctx.rect(0, 0, W, H);
     lensOutline(slit);
-    ctx.fillStyle = "#14081f";
+    ctx.fillStyle = theme().shell;
     ctx.fill("evenodd");
 
     ctx.save();
@@ -2406,17 +2784,17 @@
     // Cinematic falloff — the shell dissolves into the view instead of framing it.
     const topFade = Math.min(90, slit.h * 0.28);
     const topG = ctx.createLinearGradient(0, slit.y, 0, slit.y + topFade);
-    topG.addColorStop(0, "rgba(20,8,31,0.96)");
-    topG.addColorStop(0.35, "rgba(20,8,31,0.5)");
-    topG.addColorStop(1, "rgba(20,8,31,0)");
+    topG.addColorStop(0, shellRgba(0.96));
+    topG.addColorStop(0.35, shellRgba(0.5));
+    topG.addColorStop(1, shellRgba(0));
     ctx.fillStyle = topG;
     ctx.fillRect(0, slit.y, W, topFade);
 
     const botFade = Math.min(130, slit.h * 0.34);
     const botG = ctx.createLinearGradient(0, bottom - botFade, 0, bottom);
-    botG.addColorStop(0, "rgba(20,8,31,0)");
-    botG.addColorStop(0.5, "rgba(20,8,31,0.34)");
-    botG.addColorStop(1, "rgba(20,8,31,0.97)");
+    botG.addColorStop(0, shellRgba(0));
+    botG.addColorStop(0.5, shellRgba(0.34));
+    botG.addColorStop(1, shellRgba(0.97));
     ctx.fillStyle = botG;
     ctx.fillRect(0, bottom - botFade, W, botFade);
 
@@ -2436,7 +2814,7 @@
     const vr = Math.max(W, slit.h) * 0.62;
     const vig = ctx.createRadialGradient(cx, cy, vr * 0.35, cx, cy, vr);
     vig.addColorStop(0, "rgba(10,4,18,0)");
-    vig.addColorStop(1, `rgba(10,4,18,${LENS.vignette})`);
+    vig.addColorStop(1, `rgba(10,4,18,${LENS.vignette + (heat || 0) * HEAT.vignette + pushMix() * 0.1 + (beatPulse || 0) * 0.04})`);
     ctx.fillStyle = vig;
     ctx.fillRect(0, 0, W, H);
     ctx.restore();
@@ -2634,6 +3012,14 @@
     let jx = -braceLean * 0.5 + glanceX + Math.sin(t * 25) * wobble * 4;
     let jy = glanceY;
     let roll = tilt + glanceRoll;
+    // Heat/speed bob only while skating — not on reports or cinema cams.
+    if (phase === "play" && !cinema) {
+      const sm = speedMix();
+      const ht = heat || 0;
+      jx += Math.sin(t * 37) * ht * HEAT.shake;
+      jy += Math.cos(t * 43) * ht * HEAT.shake * 0.6;
+      jy += Math.sin(t * (6 + 6 * sm)) * DYN.bob * sm;
+    }
 
     if (tremble > 0) {
       const e = tremble * tremble;
@@ -2648,7 +3034,7 @@
     ctx.clearRect(0, 0, W, H);
 
     // Shell fill behind everything.
-    ctx.fillStyle = "#14081f";
+    ctx.fillStyle = theme().shell;
     ctx.fillRect(0, 0, W, H);
 
     const slit = slitRect();
@@ -2666,7 +3052,9 @@
 
     drawArenaStrip();
     drawFloor();
+    drawIceMarks();
     drawLane();
+    drawSkaters();
     drawGoal();
     drawPuckBody();
 

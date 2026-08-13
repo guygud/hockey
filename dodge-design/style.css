@@ -84,6 +84,23 @@ body {
   gap: 6px;
 }
 
+.round-badge {
+  min-width: 0;
+  max-width: 132px;
+  padding: 8px 12px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+}
+
+body.heat-hot .hud-speed {
+  text-shadow: 0 0 10px rgba(255, 220, 120, 0.85);
+}
+
+body.heat-hot .hud-puck-ico {
+  box-shadow: 0 0 10px rgba(255, 200, 80, 0.95);
+}
+
 .hud-puck-ico {
   width: 14px;
   height: 14px;
