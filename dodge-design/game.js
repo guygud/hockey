@@ -35,6 +35,28 @@
     bottomFracTouch: 0.8,
     openMax: 14,
   };
+  // Иллюминатор: кромки окна выгибаются дугой, корпус читается как стенка шайбы.
+  const LENS = { bulgeFrac: 0.18, bulgeMax: 110, vignette: 0.5 };
+  const MIN_SIDE_REDS = 2;
+  const SPEED_LINES = {
+    count: 26,
+    centerGapFrac: 0.17, // середина кадра остаётся читаемой
+    minMom: 0.15,
+    lenFrac: 0.26,
+    alpha: 0.5,
+    rate: 1.5,
+  };
+  // Фейковое руление: шайба всё так же катится по центру, доворачивается сцена.
+  // turn: 0 = смотрим в ворота, ±1 = максимально уведены в сторону.
+  const TURN = {
+    yawMax: (15 * Math.PI) / 180, // 15° за один шаг (|turn| = 1)
+    maxSteps: 4, // подряд красные складываются: 15°, 30°, 45°, 60°
+    rollMax: 0.02,
+    driftMax: 22,
+    iceShift: 120,
+    spring: 22,
+    damp: 7,
+  };
   const RUN_DIST = 4000;
   // Goal counts at the crease; last stick stays well before it.
   const CREASE_BACK = 200;
@@ -135,6 +157,9 @@
   let phase; // ready | play | scored | missed | stalled | goalcam | stallcam
   let runDist;
   let tilt;
+  let turn;
+  let turnVel;
+  let turnTarget;
   let braceLean;
   let glanceX;
   let glanceY;
@@ -157,6 +182,7 @@
   let netFlash;
   let lastSpawnZ;
   let finalSpawned;
+  let sideRedSpawned;
   let gradeFlashTimer;
   let gradeFlashText;
   let gradeFlashClass;
@@ -404,6 +430,22 @@
   ];
 
   function nextSpawn() {
+    const need = Math.max(0, MIN_SIDE_REDS - sideRedSpawned);
+    if (need > 0) {
+      const finalZ = runDist - FINAL_STICK_BACK;
+      const minApproach = Math.max(400, Math.max(puck.vz, SPEED_MIN) * 1.3);
+      const lead = Math.max(puck.vz, SPEED_MIN) * spawnInterval();
+      const nextZ = Math.max(lastSpawnZ + 80, puck.z + lead);
+      const room = finalZ - minApproach - nextZ;
+      const slotsAfter = Math.max(0, Math.floor(room / Math.max(80, lead)));
+      const slotsIncluding = slotsAfter + 1;
+      const progress = puck.z / Math.max(runDist, 1);
+      const late = (sideRedSpawned === 0 && progress > 0.25)
+        || (sideRedSpawned === 1 && progress > 0.55);
+      if (late || slotsIncluding <= need) {
+        return { side: resolveSpawnSide(null), foe: true };
+      }
+    }
     const side = pickSide();
     return { side, foe: pickFoe(side) };
   }
@@ -434,6 +476,7 @@
       flip: Math.random() < 0.5 ? -1 : 1,
       answer: null,
       windowOpen: false,
+      final: !!opts.final,
     };
   }
 
@@ -564,7 +607,17 @@
     const minApproach = Math.max(400, Math.max(puck.vz, SPEED_MIN) * 1.3);
 
     if (nextZ >= finalZ - minApproach) {
-      obstacles.push(makeObstacle(finalZ, 0, true));
+      if (sideRedSpawned < MIN_SIDE_REDS) {
+        const redZ = Math.min(finalZ - 80, Math.max(lastSpawnZ + 80, nextZ));
+        if (redZ < runDist - CREASE_BACK) {
+          obstacles.push(makeObstacle(redZ, resolveSpawnSide(null), true));
+          sideRedSpawned += 1;
+          lastSpawnZ = redZ;
+          return;
+        }
+      }
+      // Последняя — всегда свой пас: приняв его, выкатываемся ровно на ворота.
+      obstacles.push(makeObstacle(finalZ, resolveSpawnSide(null), false, { final: true }));
       lastSpawnZ = finalZ;
       finalSpawned = true;
       return;
@@ -572,6 +625,7 @@
 
     const spawn = nextSpawn();
     obstacles.push(makeObstacle(nextZ, spawn.side, spawn.foe));
+    if (spawn.foe && spawn.side !== 0) sideRedSpawned += 1;
     lastSpawnZ = nextZ;
   }
 
@@ -605,6 +659,9 @@
     obstacles = [];
     particles = [];
     tilt = 0;
+    turn = 0;
+    turnVel = 0;
+    turnTarget = 0;
     braceLean = 0;
     glanceX = 0;
     glanceY = 0;
@@ -637,6 +694,7 @@
     tutorOk = 0;
     lastSpawnZ = 280;
     finalSpawned = false;
+    sideRedSpawned = 0;
     gradeFlashTimer = 0;
     gradeFlashText = "";
     gradeFlashClass = "";
@@ -751,13 +809,40 @@
     };
   }
 
-  function project(x, z) {
+  function clampTurn(v) {
+    return Math.max(-TURN.maxSteps, Math.min(TURN.maxSteps, v));
+  }
+  // Во время кинематографичных камер доворот гасится, чтобы влёт и гол были по центру.
+  function turnMix() {
+    return 1 - easeInOut(outside);
+  }
+  function turnYaw() {
+    return turn * TURN.yawMax * turnMix();
+  }
+  function turnDrift() {
+    return turn * TURN.driftMax * turnMix();
+  }
+  function turnShiftPx() {
+    return -turn * TURN.iceShift * turnMix();
+  }
+  function headingAway(side) {
+    // Красная слева уводит вправо, справа — влево: нос уходит с линии ворот.
+    return side < 0 ? 1 : -1;
+  }
+
+  function project(x, z, withTurn) {
     const rig = camRig();
-    const d = z - puck.z + rig.back;
+    const yaw = withTurn ? turnYaw() : 0;
+    const dx = x - rig.x - (withTurn ? turnDrift() : 0);
+    const dz = z - puck.z + rig.back;
+    const s = Math.sin(yaw);
+    const c = Math.cos(yaw);
+    const rx = dx * c - dz * s;
+    const d = dx * s + dz * c;
     if (d < CAM.near || d > CAM.far) return null;
     const k = CAM.focal / d;
     return {
-      sx: W / 2 + (x - rig.x) * k,
+      sx: W / 2 + rx * k,
       sy: H * CAM.horizonFrac + rig.h * k,
       k,
       d,
@@ -787,13 +872,33 @@
     };
   }
 
-  function slitPath(slit) {
-    ctx.beginPath();
-    ctx.rect(slit.x, slit.y, slit.w, slit.h);
+  function lensBulge(slit) {
+    // На кинематографичных камерах (outside = 1) дуга разглаживается в леттербокс.
+    return Math.min(LENS.bulgeMax, slit.h * LENS.bulgeFrac) * (1 - easeInOut(outside));
   }
 
-  function projectHeight(x, z, worldH) {
-    const p = project(x, z);
+  function lensOutline(slit) {
+    const b = lensBulge(slit);
+    const top = slit.y;
+    const bottom = slit.y + slit.h;
+    if (b <= 0.5) {
+      ctx.rect(slit.x, slit.y, slit.w, slit.h);
+      return;
+    }
+    ctx.moveTo(0, top);
+    ctx.quadraticCurveTo(W / 2, top + b, W, top);
+    ctx.lineTo(W, bottom);
+    ctx.quadraticCurveTo(W / 2, bottom - b, 0, bottom);
+    ctx.closePath();
+  }
+
+  function slitPath(slit) {
+    ctx.beginPath();
+    lensOutline(slit);
+  }
+
+  function projectHeight(x, z, worldH, withTurn) {
+    const p = project(x, z, withTurn);
     if (!p) return null;
     return {
       sx: p.sx,
@@ -887,7 +992,15 @@
       const swing = dodged ? 1.35 : 1;
       braceLean = dir * (perfect ? 40 : 26) * swing;
       tilt = dir * (perfect ? 0.055 : 0.035) * swing;
+      if (dodged) {
+        // Каждая красная подряд добавляет ещё 15° от линии ворот.
+        turnTarget = clampTurn(turnTarget + headingAway(obs.side));
+      } else {
+        // Свой пас возвращает нос на линию ворот.
+        turnTarget = 0;
+      }
     }
+    if (obs.final) turnTarget = 0;
 
     if (dodged) sfxDodge(perfect);
     else sfxHit(perfect);
@@ -919,6 +1032,10 @@
     tilt = (Math.random() < 0.5 ? -1 : 1) * 0.1;
     wobble = 1;
     braceLean = obs.side * -12;
+    if (obs.foe && obs.side !== 0) {
+      turnTarget = clampTurn(turnTarget + headingAway(obs.side));
+    }
+    if (obs.final) turnTarget = 0;
     spawnSparks(6);
     sfxFail();
     if (obs.practice) tutorTaughtOne(false);
@@ -1067,6 +1184,9 @@
 
   function updateFx(dt) {
     tilt *= 0.88;
+    turnVel += ((turnTarget - turn) * TURN.spring - turnVel * TURN.damp) * dt;
+    turn += turnVel * dt;
+    turn = clampTurn(turn);
     braceLean *= Math.pow(0.08, dt);
     if (Math.abs(braceLean) < 0.2) braceLean = 0;
     const glanceFade = Math.exp(-GLANCE_DECAY * dt);
@@ -1674,18 +1794,19 @@
     ctx.fillRect(0, top, W, stripH);
 
     // Panel wall behind the net, then the curved board rail on top.
+    const shift = turnShiftPx();
     if (imgReady(imgs.borderTop)) {
       const wallH = Math.max(40, Math.min(110, SLIT.topAboveHorizon * 0.7));
       ctx.save();
       ctx.globalAlpha = 0.95;
-      ctx.drawImage(imgs.borderTop, -W * 0.02, horizon - wallH * 0.92, W * 1.04, wallH);
+      ctx.drawImage(imgs.borderTop, shift - W * 0.08, horizon - wallH * 0.92, W * 1.16, wallH);
       ctx.restore();
     }
     if (imgReady(imgs.board)) {
       const boardH = Math.max(28, Math.min(90, SLIT.topAboveHorizon * 0.55));
       ctx.save();
       ctx.globalAlpha = 0.96;
-      ctx.drawImage(imgs.board, -W * 0.05, horizon - boardH * 0.72, W * 1.1, boardH);
+      ctx.drawImage(imgs.board, shift - W * 0.12, horizon - boardH * 0.72, W * 1.24, boardH);
       ctx.restore();
     } else if (!imgReady(imgs.borderTop)) {
       ctx.strokeStyle = "rgba(250, 180, 255, 0.35)";
@@ -1711,10 +1832,12 @@
     ctx.fillStyle = g;
     ctx.fillRect(0, horizon, W, H - horizon);
 
+    const iceX = turnShiftPx() - W * 0.08;
+    const iceW = W * 1.16;
     if (imgReady(imgs.ice)) {
       ctx.save();
       ctx.globalAlpha = 0.97;
-      ctx.drawImage(imgs.ice, 0, iceY, W, iceH);
+      ctx.drawImage(imgs.ice, iceX, iceY, iceW, iceH);
       ctx.restore();
     }
 
@@ -1723,14 +1846,14 @@
       ctx.save();
       ctx.globalAlpha = 0.42;
       ctx.globalCompositeOperation = "multiply";
-      ctx.drawImage(imgs.iceColor, 0, iceY, W, iceH);
+      ctx.drawImage(imgs.iceColor, iceX, iceY, iceW, iceH);
       ctx.restore();
     }
     if (imgReady(imgs.iceColor2)) {
       ctx.save();
       ctx.globalAlpha = 0.35;
       ctx.globalCompositeOperation = "screen";
-      ctx.drawImage(imgs.iceColor2, 0, iceY, W, iceH);
+      ctx.drawImage(imgs.iceColor2, iceX, iceY, iceW, iceH);
       ctx.restore();
     }
 
@@ -1739,7 +1862,7 @@
     const start = Math.floor(eyeZ / CORRIDOR.ribStep) * CORRIDOR.ribStep;
     for (let i = 0; i < 70; i++) {
       const z = start + i * CORRIDOR.ribStep;
-      const p = project(0, z);
+      const p = project(0, z, true);
       if (!p) continue;
       const alpha = Math.max(0.03, 0.22 - i * 0.004);
       ctx.strokeStyle = `rgba(255,230,255,${alpha})`;
@@ -1755,10 +1878,10 @@
     const rig = camRig();
     const farZ = puck.z + CAM.far * 0.9;
     const nearZ = puck.z - rig.back + CAM.near + 2;
-    const farL = project(-CORRIDOR.halfW, farZ);
-    const farR = project(CORRIDOR.halfW, farZ);
-    const nearL = project(-CORRIDOR.halfW, nearZ);
-    const nearR = project(CORRIDOR.halfW, nearZ);
+    const farL = project(-CORRIDOR.halfW, farZ, true);
+    const farR = project(CORRIDOR.halfW, farZ, true);
+    const nearL = project(-CORRIDOR.halfW, nearZ, true);
+    const nearR = project(CORRIDOR.halfW, nearZ, true);
     if (!farL || !farR || !nearL || !nearR) return;
 
     ctx.fillStyle = "rgba(255, 210, 255, 0.07)";
@@ -1784,10 +1907,10 @@
     const z = runDist;
     const half = 100;
     const posts = [
-      projectHeight(-half, z, GOAL.postHeight),
-      projectHeight(half, z, GOAL.postHeight),
+      projectHeight(-half, z, GOAL.postHeight, true),
+      projectHeight(half, z, GOAL.postHeight, true),
     ];
-    const bases = [project(-half, z), project(half, z)];
+    const bases = [project(-half, z, true), project(half, z, true)];
     if (!posts[0] || !posts[1] || !bases[0] || !bases[1]) return;
 
     const cx = (bases[0].sx + bases[1].sx) / 2;
@@ -2181,6 +2304,46 @@
     }
   }
 
+  function hash01(i) {
+    const s = Math.sin(i * 12.9898 + 78.233) * 43758.5453;
+    return s - Math.floor(s);
+  }
+
+  // Аниме-штрихи: летят из точки схода к краям, густеют вместе со скоростью.
+  function drawSpeedLines() {
+    if (outside > 0.5) return;
+    const drive = Math.max(0, Math.min(1, (mom - SPEED_LINES.minMom) / (1 - SPEED_LINES.minMom)));
+    const load = Math.min(1, drive + boostFx * 0.8);
+    if (load <= 0.02) return;
+
+    const cx = W / 2;
+    const cy = H * CAM.horizonFrac;
+    const t = performance.now() / 1000;
+    const gap = W * SPEED_LINES.centerGapFrac;
+    const reach = Math.hypot(W, H) * 0.75;
+
+    ctx.save();
+    ctx.lineCap = "round";
+    for (let i = 0; i < SPEED_LINES.count; i++) {
+      const seed = hash01(i);
+      const ang = (i % 2 === 0 ? Math.PI : 0) + (hash01(i + 91) - 0.5) * 0.9;
+      const phase = (t * SPEED_LINES.rate * (0.7 + seed * 0.8) * (0.5 + load) + seed) % 1;
+      const r0 = gap + phase * reach;
+      const len = reach * SPEED_LINES.lenFrac * (0.45 + seed * 0.9) * (0.5 + load * 0.7);
+      const a = SPEED_LINES.alpha * load * Math.sin(Math.PI * Math.min(1, phase / 0.9));
+      if (a <= 0.01) continue;
+      const dx = Math.cos(ang);
+      const dy = Math.sin(ang) * 0.45;
+      ctx.strokeStyle = `rgba(235,215,255,${a})`;
+      ctx.lineWidth = 1 + 2.2 * load * seed;
+      ctx.beginPath();
+      ctx.moveTo(cx + dx * r0, cy + dy * r0);
+      ctx.lineTo(cx + dx * (r0 + len), cy + dy * (r0 + len));
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // Radial streaks from the vanishing point — the shove of a clean brace.
   function drawSpeedStreaks() {
     if (boostFx <= 0.02) return;
@@ -2208,6 +2371,10 @@
       ? `rgba(140,255,200,${alpha})`
       : `rgba(140,210,255,${alpha})`;
 
+    ctx.save();
+    slitPath(slit);
+    ctx.clip();
+
     // Light bleeds in from both letterbox edges — glow, not a lit frame.
     const band = Math.min(120, slit.h * 0.34);
     const topG = ctx.createLinearGradient(0, slit.y, 0, slit.y + band);
@@ -2221,14 +2388,20 @@
     botG.addColorStop(1, tint(0.5 * a));
     ctx.fillStyle = botG;
     ctx.fillRect(0, bottom - band, W, band);
+    ctx.restore();
   }
 
   function drawSlitBody(slit) {
-    // Letterbox: solid shell above and below, no rim anywhere.
     const bottom = slit.y + slit.h;
+    ctx.beginPath();
+    ctx.rect(0, 0, W, H);
+    lensOutline(slit);
     ctx.fillStyle = "#14081f";
-    ctx.fillRect(0, 0, W, slit.y);
-    ctx.fillRect(0, bottom, W, H - bottom);
+    ctx.fill("evenodd");
+
+    ctx.save();
+    slitPath(slit);
+    ctx.clip();
 
     // Cinematic falloff — the shell dissolves into the view instead of framing it.
     const topFade = Math.min(90, slit.h * 0.28);
@@ -2257,6 +2430,16 @@
       ctx.fillStyle = warnG;
       ctx.fillRect(0, bottom - warnH, W, warnH);
     }
+
+    const cx = W / 2;
+    const cy = slit.y + slit.h / 2;
+    const vr = Math.max(W, slit.h) * 0.62;
+    const vig = ctx.createRadialGradient(cx, cy, vr * 0.35, cx, cy, vr);
+    vig.addColorStop(0, "rgba(10,4,18,0)");
+    vig.addColorStop(1, `rgba(10,4,18,${LENS.vignette})`);
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
   }
 
   const CUE_FONT = '"Segoe UI", system-ui, sans-serif';
@@ -2500,6 +2683,7 @@
     }
 
     drawParticles();
+    drawSpeedLines();
     drawSpeedStreaks();
     ctx.restore();
     ctx.restore();
