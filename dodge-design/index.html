@@ -11,15 +11,14 @@
 
   <div id="hud">
     <div class="hud-top">
-      <div class="hud-left">
+      <div class="hud-cluster">
         <div class="hud-box hearts-box" id="lives-box">
           <span class="heart filled" data-i="0"></span>
           <span class="heart filled" data-i="1"></span>
           <span class="heart filled" data-i="2"></span>
         </div>
-        <div class="hud-box round-badge" id="round-badge" hidden></div>
         <div class="hud-center hud-stats">
-          <span class="hud-stat">ур : <b id="level-num">1</b></span>
+          <span class="hud-stat">ур : <b id="level-num">1</b><span id="level-mul" hidden></span></span>
           <span class="hud-stat hud-speed"><i class="hud-puck-ico"></i><b id="speed">0.0</b> км/ч</span>
         </div>
       </div>
@@ -27,25 +26,15 @@
     </div>
 
     <div class="hud-bottom">
-      <div class="stick-legend">
-        <span class="legend-item legend-team"><i></i>СВОЯ — ПОД НЕЁ</span>
-        <span class="legend-item legend-foe"><i></i>ЧУЖАЯ — В ДРУГУЮ</span>
-      </div>
       <div class="controls-hint">
-        <span>A ВЛЕВО</span>
-        <span>SPACE ПРЫЖОК</span>
-        <span>D ВПРАВО</span>
+        <span>← ВЛЕВО</span>
+        <span>↑ ПРЫЖОК</span>
+        <span>→ ВПРАВО</span>
       </div>
       <div id="touch-controls">
-        <button type="button" class="touch-btn touch-btn-left" data-input="left" aria-label="Влево A">
-          <span class="touch-label">A</span>
-        </button>
-        <button type="button" class="touch-btn touch-btn-center" data-input="brace" aria-label="Прыжок SPACE">
-          <span class="touch-label">SPACE</span>
-        </button>
-        <button type="button" class="touch-btn touch-btn-right" data-input="right" aria-label="Вправо D">
-          <span class="touch-label">D</span>
-        </button>
+        <button type="button" class="touch-btn touch-btn-left" data-input="left" aria-label="Влево"></button>
+        <button type="button" class="touch-btn touch-btn-center" data-input="brace" aria-label="Прыжок"></button>
+        <button type="button" class="touch-btn touch-btn-right" data-input="right" aria-label="Вправо"></button>
       </div>
     </div>
 
@@ -71,18 +60,25 @@
       </div>
     </div>
 
+    <div id="rating-overlay" hidden>
+      <div class="rating-panel">
+        <div class="rating-title">Рейтинг</div>
+        <div class="rating-you">
+          <div id="rating-name"></div>
+          <div id="rating-score"></div>
+        </div>
+        <ol class="rating-list" id="rating-list"></ol>
+        <div class="rating-place" id="rating-place" hidden></div>
+        <div class="rating-error" id="rating-error" hidden>Рейтинг недоступен</div>
+        <button id="rating-restart" type="button">Начать заново</button>
+      </div>
+    </div>
+
     <div id="intro">
       <div class="intro-panel">
       <h1>Свои и чужие</h1>
-      <p class="intro-sub">Ты смотришь изнутри шайбы и стартуешь на полной скорости. По цвету клюшки решай: подставиться или уйти. Инерция — запас ошибок: две ошибки, и попытка кончена.</p>
-      <ol class="intro-list">
-        <li><b class="ink-team">Синяя клюшка — своя</b>: это пас. Подставься <b>той же</b> стороной: слева — <b>A</b>, справа — <b>D</b>. Точный приём разгоняет сильнее всего — скорость берётся отсюда.</li>
-        <li><b class="ink-foe">Красная клюшка — чужая</b>: отбирают шайбу. Уходи в <b>другую</b> сторону: клюшка слева — <b>D</b>, справа — <b>A</b>. Уворот спасает, но скорости почти не даёт.</li>
-        <li>Иногда с двух сторон вылетают <b class="ink-foe">две красные</b> сразу — их перепрыгиваешь: <b>SPACE</b>.</li>
-        <li>Любая ошибка снимает <b>половину</b> запаса инерции. Скорость сверху — км/ч; у нуля попытка кончена.</li>
-        <li><b>Жизни</b> — сколько раз можно не долететь до ворот. <b>Серия</b> — голы на текущих трёх жизнях. Каждая попытка чуть сложнее: чужих больше, окно уже.</li>
-      </ol>
-      <p class="intro-note">Первый забег — пошаговое обучение с паузами: игра остановится, покажет правило и нужную кнопку. Блик на льду — момент удара. На телефоне тапай по левой, центральной или правой части экрана.</p>
+      <p class="intro-sub">Уворачивайся от красных клюшек — жми стрелки.</p>
+      <p class="intro-keys"><span>← влево</span><span>↑ прыжок</span><span>→ вправо</span></p>
       <button id="start-btn" type="button">Поехали</button>
       <button id="tutor-again" type="button" class="ghost-btn" hidden>Пройти обучение снова</button>
       </div>
@@ -90,6 +86,6 @@
   </div>
 
   <a class="back-link" href="../">← К играм</a>
-  <script src="game.js"></script>
+  <script type="module" src="src/main.js"></script>
 </body>
 </html>
