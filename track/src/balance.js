@@ -48,7 +48,7 @@ export const TRACK = {
 };
 
 /**
- * Одна строка — один уровень. Индекс 2 (в интерфейсе «3») — эталон ?pose=1,
+ * Одна строка — один уровень. Индекс 5 (в интерфейсе «6») — эталон ?pose=1,
  * его числа менять только вместе с buildPoseCourse.
  *   gateWide/gateTight — ширина свободного прохода, единицы
  *   tightShare — доля узких створок среди боковых блоков
@@ -58,13 +58,13 @@ export const TRACK = {
  */
 export const LEVELS = [
   { sticks: 6, gateWide: 285, gateTight: 250, tightShare: 0.34, room: 1.75, cadence: 1.3, jumpRoom: 2.6 },
-  { sticks: 8, gateWide: 275, gateTight: 200, tightShare: 0.25, room: 1.45, cadence: 1.05, jumpRoom: 2.2 },
+  { sticks: 7, gateWide: 281, gateTight: 232, tightShare: 0.37, room: 1.64, cadence: 1.21, jumpRoom: 2.46 },
+  { sticks: 8, gateWide: 278, gateTight: 214, tightShare: 0.4, room: 1.53, cadence: 1.12, jumpRoom: 2.32 },
+  { sticks: 8, gateWide: 274, gateTight: 196, tightShare: 0.44, room: 1.42, cadence: 1.03, jumpRoom: 2.18 },
+  { sticks: 9, gateWide: 271, gateTight: 179, tightShare: 0.47, room: 1.31, cadence: 0.94, jumpRoom: 2.04 },
   { sticks: 10, gateWide: 267, gateTight: 161, tightShare: 0.5, room: 1.2, cadence: 0.85, jumpRoom: 1.9 },
-  { sticks: 12, gateWide: 258, gateTight: 154, tightShare: 0.55, room: 1.15, cadence: 0.82, jumpRoom: 1.8 },
-  { sticks: 13, gateWide: 250, gateTight: 147, tightShare: 0.6, room: 1.11, cadence: 0.79, jumpRoom: 1.72 },
-  { sticks: 15, gateWide: 242, gateTight: 141, tightShare: 0.65, room: 1.07, cadence: 0.76, jumpRoom: 1.65 },
-  { sticks: 16, gateWide: 235, gateTight: 135, tightShare: 0.7, room: 1.04, cadence: 0.73, jumpRoom: 1.58 },
-  { sticks: 17, gateWide: 228, gateTight: 129, tightShare: 0.8, room: 1.01, cadence: 0.71, jumpRoom: 1.52 },
+  { sticks: 13, gateWide: 252, gateTight: 149, tightShare: 0.63, room: 1.13, cadence: 0.8, jumpRoom: 1.76 },
+  { sticks: 15, gateWide: 237, gateTight: 136, tightShare: 0.77, room: 1.05, cadence: 0.74, jumpRoom: 1.61 },
   { sticks: 18, gateWide: 222, gateTight: 124, tightShare: 0.9, room: 0.98, cadence: 0.69, jumpRoom: 1.47 },
 ];
 

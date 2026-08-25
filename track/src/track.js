@@ -133,11 +133,10 @@ const PATTERNS = {
 function patternNames(level) {
   const pool = ["slalom", "slalom", "cross"];
   if (level >= 1) pool.push("boostLane");
-  if (level >= 2) pool.push("slalom", "cross", "boostLane");
-  if (level >= 3) pool.push("comb");
-  if (level >= 4) pool.push("funnel", "mix");
-  if (level >= 5) pool.push("mix", "comb");
-  if (level >= 6) pool.push("hurdles", "funnel");
+  if (level >= 4) pool.push("slalom", "cross", "boostLane");
+  if (level >= 6) pool.push("comb");
+  if (level >= 7) pool.push("funnel", "mix");
+  if (level >= 8) pool.push("mix", "comb", "hurdles", "funnel");
   return pool;
 }
 
