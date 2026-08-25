@@ -42,8 +42,11 @@ export const CAM = { height: 22, focal: 460, near: 6, far: 4400, horizonFrac: 0.
 /** Внешняя камера для влёта, гола и остановки. x = 0, чтобы шайба была по центру. */
 export const CAM_OUT = { back: 190, height: 86, x: 0 };
 
+/** Влёт: выше и дальше, за правым плечом шайбы. */
+export const CAM_INTRO = { back: 330, height: 190, x: 78 };
+
 /** Верх кадра: трибуны над бортом и высота самого борта. */
-export const ARENA = { wallH: 98, boardH: 78 };
+export const ARENA = { wallH: 160, boardH: 56 };
 
 /** Капот: видимая четверть шайбы у нижней кромки кадра. */
 export const HOOD = {
@@ -92,8 +95,28 @@ export const ICE_MARKS = {
   emojis: ["🏒", "⭐", "❄️", "🔥", "⚡", "💎", "👑", "🎯", "💙", "🧊", "🏆", "✨"],
 };
 
-/** Декор: игроки проезжают по бортам и не участвуют в правилах. */
-export const SKATERS = { max: 5, spawnGap: 1.15 };
+/** Конусы по кромке: шаг по z, чередование сторон. */
+export const CONES = {
+  step: 400,
+  startZ: 400,
+  edge: 6,
+  worldW: 36,
+  maxScreenFrac: 0.16,
+  nearFade: 70,
+};
+
+/** Декор: свои стоят за бортом. Поворот по своей дистанции, не из тройки врагов. */
+export const SKATERS = {
+  max: 6,
+  spawnGap: 1.05,
+  appearChance: 0.88,
+  outMin: 52,
+  outMax: 118,
+  worldW: 250,
+  maxScreenFrac: 0.72,
+  nearZ: 420,
+  pow: 0.65,
+};
 
 /** Накал от серии без ошибок: тряска, штрихи, питч звука, виньетка. */
 export const HEAT = { full: 6, shake: 0.9, lines: 0.45, pitch: 0.22, vignette: 0.12 };
@@ -105,45 +128,112 @@ export const DYN = { fovPull: 0.07, dip: 4, bob: 0.8 };
 export const BEAT = { kick: 0.05, hat: 0.022, pulse: 0.35 };
 
 /**
- * Внешний вид клюшки. Углы — градусы на экране, 0 = горизонталь.
- * Положительное значение = ручка поднята над лезвием (к верху экрана).
- * swing идёт 0 (только появилась) → 1 (поза удара).
+ * Фигура хоккеиста. Якорь — пиксель крюка, нормированный по размеру спрайта.
+ * bladeX/Y заданы для спрайта с крюком слева (enemy.png, enemy_easy_left).
  */
-export const STICK = {
-  angleAppearDeg: -45,
-  angleStopDeg: -32,
-  teamAppearDeg: 32, // замах: ручка вверх
-  teamStopDeg: -18, // после щелчка: лезвие через шайбу
-  crossAppearDeg: -28, // лобовая пара под SPACE
-  crossStopDeg: -18,
-  worldLen: 270, // длина спрайта в мировых единицах
-  maxScreenFrac: 1.82, // никогда не шире этой доли экрана
-  tipHeight: -10, // высота лезвия надо льдом
+export const PLAYER = {
+  worldW: 390,
+  bladeX: 0.22,
+  bladeY: 0.86,
+  feetX: 0.58,
+  feetY: 0.97,
+  /** Сдвиг к своему борту: конёк не торчит в свободную полосу. */
+  boardPull: 49,
+  maxScreenFrac: 2.47,
+  /** Доля полуширины коридора от центра до крюка прыжковой пары. */
+  jumpSpread: 0.364,
+  /** Союзники: доля полуширины коридора от оси до крюка, ближе к борту. */
+  allyEdge: 0.82,
+  /** Напарник за плечом: насколько за бортом и насколько впереди противника. */
+  mateOut: 350,
+  mateAhead: 220,
   tipZOffset: -1,
-  /** Сколько мировых единиц клюшка ещё скользит мимо после разрешения. */
   slipSpan: 160,
-  /**
-   * Успешный уворот: лезвие резко уносит в СВОЮ сторону — прочь от того, куда
-   * ушла шайба. В долях полуширины коридора. Раньше знак был обратный, и на
-   * увороте казалось, что клюшка гонится за нами.
-   */
   dodgeWhip: 2.6,
-  /** Потолок толщины нарисованной клюшки вблизи. */
-  nearWidthCap: 56,
+  nearFade: 80,
+};
+
+/** Бьющий на влёте: тот же якорь, что у полевых, но кадр держит рост целиком. */
+export const STRIKER = { ...PLAYER, worldW: 210, maxScreenFrac: 0.42 };
+
+/** Компактный враг: крюк у самого края кадра. */
+export const PLAYER_EASY = {
+  worldW: 372,
+  bladeX: 0.07,
+  bladeY: 0.87,
+  feetX: 0.52,
+  feetY: 0.96,
+  boardPull: 11,
+  maxScreenFrac: 2.54,
+};
+
+/** Картонные манекены: дальние стоят ребром, ближние доворачиваются лицом. */
+export const CUTOUT = {
+  faceCount: 3,
+  turnRate: 6.5,
+  maxAngle: 1.68,
+  minEdge: 0.045,
+  backTint: "#eef2f8",
+  backEdge: "#c3cede",
+  /** Союзники: стоят лицом, приоткрыты на allyOpenDeg, добор на самом проезде. */
+  allyOpenDeg: 15,
+  allyNearZ: 310,
+  allyPow: 0.62,
+};
+
+/** Вратарь в створе. Якорь — коньки; клюшка в кадре слева от тела. */
+export const GOALIE = {
+  size: 1.18,
+  feetX: 0.7,
+  feetY: 0.97,
+  zBack: 18,
+  span: 46,
+  pace: 0.2,
+  /** Сжать спрайт по X. 1 = как в файле. */
+  widthScale: 0.8,
+  /** С какой дистанции появляется и доворачивается, как полевые. */
+  nearZ: 3000,
+  nearPow: 0.45,
+  /** Непрозрачная часть gater.png, доли ширины кадра. */
+  bodyL: 0.04,
+  bodyR: 0.85,
+  aspect: 366 / 424,
 };
 
 /** Ворота. Положительный yDownFrac опускает сетку ниже по экрану. */
 export const GOAL = { yDownFrac: 0.3, postHeight: 110 };
 
+/** Мировые края тела вратаря. dir < 0 — спрайт зеркален вокруг коньков. */
+export function goalieBodyWorld(x = 0, dir = 1) {
+  const worldW = GOAL.postHeight * 1.25 * GOALIE.size * GOALIE.aspect * GOALIE.widthScale;
+  const leftOff = (GOALIE.bodyL - GOALIE.feetX) * worldW;
+  const rightOff = (GOALIE.bodyR - GOALIE.feetX) * worldW;
+  if (dir < 0) return { left: x - rightOff, right: x - leftOff };
+  return { left: x + leftOff, right: x + rightOff };
+}
+
 /** Тайминги кинематографичных камер, в секундах. */
 export const CINEMA = {
-  introHold: 0.3,
+  introWindup: 0.42,
+  introSnap: 0.08,
+  introHold: 0.32,
   introDive: 0.45,
+  /** Старт: боком, 20° к нам лицом. Финиш: спина через левое плечо. */
+  introOpenDeg: 20,
+  introBackDeg: 168,
+  introStrikePow: 3.4,
+  /** Дополнительный отступ ног от шайбы на замахе; к удару схлопывается. */
+  introStandGap: 32,
+  /** После щелчка картон гуляет вокруг оси вращения. */
+  introWobbleDeg: 16,
+  introWobbleHz: 7.2,
+  introWobbleDecay: 4.6,
   /** Гол: резкий выход наружу, потом разгон в сетку — без слоу-мо. */
   goalPop: 0.14,
   goalRush: 2.55,
   goalReportAt: 0.95,
   missDur: 0.85,
+  saveDur: 0.9,
   stallDur: 1.2,
 };
 

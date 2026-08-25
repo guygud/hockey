@@ -1,20 +1,22 @@
-// Неоновый арт-пак. Пути относительно dodge-design/index.html.
+// Новый арт-пак. Пути относительно track/index.html.
 
 const ASSET_SRC = {
-  blueLeft: "../assets/blue-left.png",
-  blueRight: "../assets/blue-right.png",
-  redLeft: "../assets/red-left.png",
-  redRight: "../assets/red_right.png",
-  puck: "../assets/puck.png",
-  ice: "../assets/ice.png",
-  iceColor: "../assets/ice-color.png",
-  iceColor2: "../assets/ice-color2.png",
-  gate: "../assets/gate.svg",
-  board: "../assets/board.svg",
-  borderTop: "../assets/border-top.png",
-  signal: "../assets/signal.svg",
+  comrade: "../assets/new/comrade.png",
+  comradeLeft: "../assets/new/comrade_left.png",
+  enemy: "../assets/new/enemy.png",
+  enemyLeft: "../assets/new/enemy_left.png",
+  enemyEasyLeft: "../assets/new/enemy_easy_left.png",
+  enemyEasyRight: "../assets/new/enemy_easy_right.png",
+  puck: "../assets/new/shaiba.png",
+  ice: "../assets/new/ice.png",
+  gate: "../assets/new/gate.svg",
+  board: "../assets/new/board.png",
+  tribune: "../assets/new/tribune.png",
+  gater: "../assets/new/gater.png",
+  speed: "../assets/new/speed.png",
+  flashs: "../assets/new/flashs.png",
+  conus: "../assets/new/conus.png",
   hit: "../assets/hit.png",
-  konki: "../assets/konki.png",
 };
 
 export const imgs = {};
@@ -26,33 +28,4 @@ for (const [key, src] of Object.entries(ASSET_SRC)) {
 
 export function imgReady(img) {
   return !!(img && img.complete && img.naturalWidth > 0);
-}
-
-let konkiCut = null;
-
-/**
- * Спрайт коньков идёт на чёрном фоне — вырезаем его один раз в offscreen-канву
- * и дальше рисуем уже готовую. При отказе getImageData отдаём исходник.
- */
-export function konkiSprite() {
-  if (konkiCut) return konkiCut;
-  if (!imgReady(imgs.konki)) return null;
-  const src = imgs.konki;
-  try {
-    const c = document.createElement("canvas");
-    c.width = src.naturalWidth;
-    c.height = src.naturalHeight;
-    const x = c.getContext("2d");
-    x.drawImage(src, 0, 0);
-    const data = x.getImageData(0, 0, c.width, c.height);
-    const p = data.data;
-    for (let i = 0; i < p.length; i += 4) {
-      if (p[i] < 22 && p[i + 1] < 22 && p[i + 2] < 22) p[i + 3] = 0;
-    }
-    x.putImageData(data, 0, 0);
-    konkiCut = c;
-  } catch (err) {
-    konkiCut = src;
-  }
-  return konkiCut;
 }

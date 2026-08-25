@@ -35,7 +35,7 @@ function update(dt) {
   }
 
   if (cine === "intro") {
-    updatePuck(dt);
+    if (S.cinema && S.cinema.hit) updatePuck(dt);
     updateObstacles();
     updateParticles(dt);
     updateSkaters(dt);
@@ -187,7 +187,12 @@ onClick(ui.resumeBtn, () => setPaused(false));
 
 window.addEventListener("resize", resize);
 
-resetGame();
+if (new URLSearchParams(window.location.search).get("pose")) {
+  showIntro(false);
+  resetRun({});
+} else {
+  resetGame();
+}
 resize();
 requestAnimationFrame((ts) => {
   S.lastTs = ts;

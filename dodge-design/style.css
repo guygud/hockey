@@ -462,7 +462,7 @@ body.paused .controls-hint {
   transform: translate(-50%, -50%);
   padding: 10px 22px;
   border-radius: 10px;
-  background: rgba(255, 80, 40, 0.88);
+  background: rgba(255, 80, 40, 0.55);
   font-size: 19px;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -470,23 +470,23 @@ body.paused .controls-hint {
 }
 
 #brace-flash.grade-perfect {
-  background: rgba(46, 204, 113, 0.92);
+  background: rgba(46, 204, 113, 0.62);
 }
 
 #brace-flash.grade-good {
-  background: rgba(52, 152, 219, 0.92);
+  background: rgba(52, 152, 219, 0.62);
 }
 
 #brace-flash.grade-late {
-  background: rgba(230, 150, 40, 0.94);
+  background: rgba(230, 150, 40, 0.64);
 }
 
 #brace-flash.grade-miss {
-  background: rgba(231, 76, 60, 0.92);
+  background: rgba(231, 76, 60, 0.62);
 }
 
 #brace-flash.grade-whiff {
-  background: rgba(120, 120, 140, 0.88);
+  background: rgba(120, 120, 140, 0.55);
 }
 
 #status {

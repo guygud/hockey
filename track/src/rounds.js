@@ -9,6 +9,8 @@
 
 import { ICE_MARKS } from "./tuning.js";
 
+const HOOD = ["#5a3a88", "#2a1648"];
+
 /** Нейтральный заезд: обучение и разминка, никаких модификаторов. */
 export const ROUND_NEUTRAL = {
   id: "clean",
@@ -16,12 +18,12 @@ export const ROUND_NEUTRAL = {
   bpm: 0,
   emojis: ICE_MARKS.emojis,
   theme: {
-    shell: "#14081f",
-    strip: ["#12081f", "#2a1050", "#6b3aa8"],
-    floor: ["#5a2d8a", "#7a45b0", "#3d1866"],
-    tint: [0.42, 0.35],
-    lane: ["rgba(255,210,255,0.07)", "rgba(255,220,120,0.55)"],
-    lines: "235,215,255",
+    shell: "#2a3a58",
+    strip: ["#9aa8d4", "#c4cce8", "#dde4f4"],
+    floor: ["#d4ebf6", "#b4d8ee", "#8ec4e0"],
+    lane: ["rgba(40,90,150,0.06)", "rgba(40,90,160,0.38)"],
+    lines: "50,80,120",
+    hood: HOOD,
   },
   mods: {},
 };
@@ -33,12 +35,12 @@ export const ROUNDS = [
     bpm: 118,
     emojis: ["❄️", "🌙", "🧊", "⭐"],
     theme: {
-      shell: "#0a1020",
-      strip: ["#080c18", "#122040", "#1a3a6a"],
-      floor: ["#1a2a50", "#243868", "#0e1830"],
-      tint: [0.5, 0.22],
-      lane: ["rgba(140,190,255,0.07)", "rgba(160,210,255,0.5)"],
-      lines: "180,210,255",
+      shell: "#243050",
+      strip: ["#7a8ab8", "#a8b4d8", "#c8d4ec"],
+      floor: ["#c0d8ee", "#9cc4e4", "#78b0d6"],
+      lane: ["rgba(40,80,160,0.07)", "rgba(80,130,210,0.4)"],
+      lines: "40,70,120",
+      hood: HOOD,
     },
     // Просторнее и мягче: дышащий заезд между двумя злыми.
     mods: { gapMul: 1.1, gateMul: 1.08 },
@@ -49,12 +51,12 @@ export const ROUNDS = [
     bpm: 140,
     emojis: ["⚡", "🎯", "🏒"],
     theme: {
-      shell: "#061818",
-      strip: ["#041414", "#0a3030", "#147070"],
-      floor: ["#0e3a3a", "#1a5858", "#082828"],
-      tint: [0.38, 0.4],
-      lane: ["rgba(80,255,230,0.08)", "rgba(90,255,220,0.55)"],
-      lines: "140,255,240",
+      shell: "#1e3a40",
+      strip: ["#7aa8b0", "#a8d0d4", "#c8e8e8"],
+      floor: ["#c4ece8", "#98d8d4", "#70c4c0"],
+      lane: ["rgba(20,120,120,0.07)", "rgba(20,150,140,0.4)"],
+      lines: "30,90,90",
+      hood: HOOD,
     },
     // Плотно, но окно шире — темп, а не точность.
     mods: { gapMul: 0.82 },
@@ -65,12 +67,12 @@ export const ROUNDS = [
     bpm: 128,
     emojis: ["🔥", "🏆", "💥"],
     theme: {
-      shell: "#1a0808",
-      strip: ["#180606", "#4a1810", "#8a3020"],
-      floor: ["#5a2018", "#7a3020", "#2a0c0c"],
-      tint: [0.36, 0.42],
-      lane: ["rgba(255,180,120,0.08)", "rgba(255,160,80,0.55)"],
-      lines: "255,200,150",
+      shell: "#3a2a38",
+      strip: ["#c8a8b0", "#e0c8c8", "#f0e0d8"],
+      floor: ["#f0dce8", "#e0c4d0", "#d0a8b8"],
+      lane: ["rgba(180,80,80,0.07)", "rgba(200,90,70,0.4)"],
+      lines: "120,70,70",
+      hood: HOOD,
     },
     // Самый злой: больше чужих, больше прыжков, инерция тает быстрее.
     mods: { drainMul: 1.1, gateMul: 0.9, gapMul: 0.92 },
@@ -81,12 +83,12 @@ export const ROUNDS = [
     bpm: 112,
     emojis: ["💎", "👑", "✨"],
     theme: {
-      shell: "#0c0818",
-      strip: ["#0a0616", "#1a1040", "#3a2080"],
-      floor: ["#241850", "#382870", "#140c30"],
-      tint: [0.46, 0.28],
-      lane: ["rgba(180,160,255,0.07)", "rgba(200,180,255,0.5)"],
-      lines: "200,190,255",
+      shell: "#2c2848",
+      strip: ["#a098c8", "#c8c0e0", "#e0dcf0"],
+      floor: ["#dcd4f0", "#c4bce4", "#a8a0d4"],
+      lane: ["rgba(90,70,160,0.07)", "rgba(140,110,210,0.4)"],
+      lines: "70,60,120",
+      hood: HOOD,
     },
     mods: { drainMul: 0.9 },
   },

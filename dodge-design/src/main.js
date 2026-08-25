@@ -10,7 +10,7 @@ import { canvas, tutorUi, ui } from "./dom.js";
 import { resize, W } from "./viewport.js";
 import { render } from "./render.js";
 import { nudgeLook, tickBeat, updateFx, updateParticles, updateSkaters } from "./fx.js";
-import { handleInputs, updateObstacles, updatePuck } from "./rules.js";
+import { dashSide, handleInputs, updateObstacles, updatePuck } from "./rules.js";
 import { maybeSpawnObstacles } from "./spawn.js";
 import { updateHud } from "./hud.js";
 import {
@@ -59,7 +59,7 @@ function update(dt) {
   // Влёт: шайба уже катится, но подсказки и ввод ждут, пока мы окажемся внутри.
   if (cine === "intro") {
     updatePuck(dt);
-    updateObstacles();
+    updateObstacles(dt);
     updateParticles(dt);
     updateSkaters(dt);
     updateFx(dt);
@@ -87,7 +87,7 @@ function update(dt) {
     maybeSpawnObstacles();
   }
 
-  updateObstacles();
+  updateObstacles(dt);
   updateParticles(dt);
   updateSkaters(dt);
   tickBeat(dt);
@@ -122,28 +122,32 @@ function queueInput(code) {
     runContinue();
     return;
   }
-  // Взгляд дёргается в сторону нажатия; сама шайба едет прямо.
+  // Взгляд дёргается в сторону нажатия; шайба делает рывок на тот же тап.
   nudgeLook(code);
+  dashSide(code);
   S.pendingInputs.push(code);
 }
 
 const zoneFromX = (x) => (x < W / 3 ? "left" : x > (W / 3) * 2 ? "right" : "brace");
+
+function codeFromKey(e) {
+  if (e.code === "ArrowLeft" || e.code === "KeyA") return "left";
+  if (e.code === "ArrowRight" || e.code === "KeyD") return "right";
+  if (e.code === "ArrowUp" || e.code === "Space") return "brace";
+  return null;
+}
 
 window.addEventListener("keydown", (e) => {
   if (e.repeat) return;
   if (e.code === "Escape") {
     e.preventDefault();
     togglePause();
-  } else if (e.code === "ArrowLeft" || e.code === "KeyA") {
-    e.preventDefault();
-    queueInput("left");
-  } else if (e.code === "ArrowRight" || e.code === "KeyD") {
-    e.preventDefault();
-    queueInput("right");
-  } else if (e.code === "ArrowUp" || e.code === "Space") {
-    e.preventDefault();
-    queueInput("brace");
+    return;
   }
+  const code = codeFromKey(e);
+  if (!code) return;
+  e.preventDefault();
+  queueInput(code);
 });
 
 // Весь экран — три полосы: нажатие попадает в ту колонку, где оно случилось.

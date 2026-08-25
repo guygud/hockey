@@ -30,30 +30,53 @@ export const MOMENTUM = {
 
 /** Скорость шайбы в мировых единицах в секунду. */
 export const SPEED = {
-  min: 130,
-  max: 530,
+  min: 273,
+  max: 1110,
   kmhScale: 170 / 530,
 };
 
 /** Геометрия трассы. */
 export const TRACK = {
-  creaseBack: 200,
+  creaseBack: 67,
+  /** Пустой лёд после последней преграды до створа, секунды хода. */
+  goalTime: 1,
   /** Клюшка бьёт здесь, впереди шайбы — иначе контакт случается уже под ногами. */
   hitLine: 100,
   /** Пауза перед первой клюшкой, в секундах. */
   openTime: 1.5,
-  gapStart: 1.9,
-  gapEnd: 1.55,
-  gapFloor: 1.35,
-  tailTime: 0.32,
-  l0LengthMul: 1.35,
+  tailTime: 0.11,
 };
 
-/** Сколько препятствий на уровне. */
-export const STICKS = {
-  perLevel: [6, 10, 12, 14, 16, 17, 18, 18, 18],
-  every: 5,
-  max: 24,
+/**
+ * Одна строка — один уровень. Индекс 2 (в интерфейсе «3») — эталон ?pose=1,
+ * его числа менять только вместе с buildPoseCourse.
+ *   gateWide/gateTight — ширина свободного прохода, единицы
+ *   tightShare — доля узких створок среди боковых блоков
+ *   room — запас времени на переезд, 1.0 = ровно минимум из покоя
+ *   cadence — ритм между связками, секунды
+ *   jumpRoom — множитель времени полёта для зазора вокруг прыжков
+ */
+export const LEVELS = [
+  { sticks: 6, gateWide: 285, gateTight: 250, tightShare: 0.34, room: 1.75, cadence: 1.3, jumpRoom: 2.6 },
+  { sticks: 8, gateWide: 275, gateTight: 200, tightShare: 0.25, room: 1.45, cadence: 1.05, jumpRoom: 2.2 },
+  { sticks: 10, gateWide: 267, gateTight: 161, tightShare: 0.5, room: 1.2, cadence: 0.85, jumpRoom: 1.9 },
+  { sticks: 12, gateWide: 258, gateTight: 154, tightShare: 0.55, room: 1.15, cadence: 0.82, jumpRoom: 1.8 },
+  { sticks: 13, gateWide: 250, gateTight: 147, tightShare: 0.6, room: 1.11, cadence: 0.79, jumpRoom: 1.72 },
+  { sticks: 15, gateWide: 242, gateTight: 141, tightShare: 0.65, room: 1.07, cadence: 0.76, jumpRoom: 1.65 },
+  { sticks: 16, gateWide: 235, gateTight: 135, tightShare: 0.7, room: 1.04, cadence: 0.73, jumpRoom: 1.58 },
+  { sticks: 17, gateWide: 228, gateTight: 129, tightShare: 0.8, room: 1.01, cadence: 0.71, jumpRoom: 1.52 },
+  { sticks: 18, gateWide: 222, gateTight: 124, tightShare: 0.9, room: 0.98, cadence: 0.69, jumpRoom: 1.47 },
+];
+
+/** Куда упирается бесконечный хвост после последнего уровня. */
+export const LEVEL_FLOOR = {
+  sticks: 24,
+  gateWide: 200,
+  gateTight: 112,
+  tightShare: 1,
+  room: 0.88,
+  cadence: 0.62,
+  jumpRoom: 1.35,
 };
 
 /**
@@ -69,12 +92,14 @@ export const STEER = {
   maxX: 184,
 };
 
-/** Прыжок. Полёт ≈ 0.6 с, clear — высота, с которой low уже не бьёт. */
+/** Прыжок. Полёт ≈ 0.6 с, clear — высота, с которой low уже не бьёт.
+ *  laneFrac — доля ширины коридора, где прыжок вообще засчитывается. */
 export const JUMP = {
   vy: 210,
   gravity: 700,
   clear: 18,
   buffer: 0.14,
+  laneFrac: 0.3,
 };
 
 export const jumpAirTime = () => (2 * JUMP.vy) / JUMP.gravity;
@@ -82,21 +107,11 @@ export const jumpAirTime = () => (2 * JUMP.vy) / JUMP.gravity;
 /** Радиус шайбы для столкновений. */
 export const PUCK = { radius: 16 };
 
-/** Ширина свободного прохода между клюшками. */
-export const GATE = {
-  start: 168,
-  end: 108,
-  floor: 96,
-};
-
 /** Зазор меньше этого (в мировых единицах) считается проездом впритирку. */
 export const GRAZE = 14;
 
 /** Насколько глубоко шайба вошла в клюшку: меньше — задели край, больше — полный удар. */
 export const CLIP = { pen: 20, height: 8 };
-
-/** Запас времени на объезд: 1.2 = на 20% больше, чем минимум из rest. */
-export const SAFETY = 1.2;
 
 /**
  * Прицел. Растёт от ударов, гасится чистыми проездами и синими воротами.
@@ -124,7 +139,7 @@ export const ENDLESS = {
 
 export const MAX_LIVES = 3;
 
-export const MAX_LEVEL = STICKS.perLevel.length - 1;
+export const MAX_LEVEL = LEVELS.length - 1;
 
 export function levelMix(level) {
   return Math.min(level, MAX_LEVEL) / MAX_LEVEL;
@@ -156,33 +171,33 @@ export function launchSpeed(level) {
   return (SPEED.min + MOMENTUM.start * (SPEED.max - SPEED.min)) * speedMul(level);
 }
 
-export function sticksFor(level) {
-  const table = STICKS.perLevel;
-  if (level < table.length) return table[level];
-  const plateau = table[table.length - 1];
-  const extra = Math.ceil((level - (table.length - 1)) / STICKS.every);
-  return Math.min(STICKS.max, plateau + extra);
+export function levelSpec(level, mods = {}) {
+  const base = LEVELS[Math.min(level, MAX_LEVEL)];
+  const over = endlessOver(level);
+  const t = over > 0 ? over / (over + ENDLESS.soft) : 0;
+  const to = LEVEL_FLOOR;
+  const mixNum = (a, b) => a + (b - a) * t;
+  return {
+    sticks: Math.round(mixNum(base.sticks, to.sticks)),
+    gateWide: mixNum(base.gateWide, to.gateWide) * (mods.gateMul || 1),
+    gateTight: mixNum(base.gateTight, to.gateTight) * (mods.gateMul || 1),
+    tightShare: mixNum(base.tightShare, to.tightShare),
+    room: mixNum(base.room, to.room) * (mods.roomMul || 1),
+    cadence: mixNum(base.cadence, to.cadence) * (mods.gapMul || 1),
+    jumpRoom: mixNum(base.jumpRoom, to.jumpRoom),
+  };
 }
 
-export function gapFor(level, mods = {}) {
-  let gap = TRACK.gapStart + (TRACK.gapEnd - TRACK.gapStart) * levelMix(level);
-  const over = endlessOver(level);
-  if (over > 0) {
-    const t = Math.min(1, over / 12);
-    gap = TRACK.gapEnd + (TRACK.gapFloor - TRACK.gapEnd) * t;
-  }
-  return Math.max(TRACK.gapFloor, gap * Math.min(1, mods.gapMul || 1));
-}
+export const sticksFor = (level, mods = {}) => levelSpec(level, mods).sticks;
 
-export function gateFor(level, mods = {}) {
-  let g = GATE.start + (GATE.end - GATE.start) * levelMix(level);
-  const over = endlessOver(level);
-  if (over > 0) {
-    const t = Math.min(1, over / 12);
-    g = GATE.end + (GATE.floor - GATE.end) * t;
-  }
-  g *= mods.gateMul || 1;
-  return Math.max(GATE.floor, g);
+/**
+ * Прогон после последнего препятствия до створа.
+ * Щели изо льда нет: сетка стоит сразу за последними. Если последняя —
+ * прыжок, оставляем время приземления, чтобы не влетать во вратаря в воздухе.
+ */
+export function goalTailZ(level, v, lastKind = null) {
+  const land = lastKind === "low" ? jumpAirTime() : 0;
+  return TRACK.creaseBack + v * (TRACK.goalTime + TRACK.tailTime + land);
 }
 
 /**
@@ -190,12 +205,11 @@ export function gateFor(level, mods = {}) {
  * ставит фактический runDist по последнему препятствию.
  */
 export function trackLength(level, mods = {}, introTime = 0) {
-  const n = sticksFor(level);
+  const spec = levelSpec(level, mods);
   const v = launchSpeed(level);
-  const step = gapFor(level, mods) * v;
-  const last = 40 + introTime * v + TRACK.openTime * v + Math.max(0, n - 1) * step;
-  const dist = Math.round(last + TRACK.creaseBack + v * TRACK.tailTime);
-  return level === 0 ? Math.round(dist * TRACK.l0LengthMul) : dist;
+  const step = spec.cadence * v;
+  const last = 40 + introTime * v + TRACK.openTime * v + Math.max(0, spec.sticks - 1) * step;
+  return Math.round(last + goalTailZ(level, v));
 }
 
 export function drainFor(level, mods = {}, runDist = 0) {
@@ -247,13 +261,17 @@ export function tierName(level) {
 }
 
 export function levelRow(level, mods = {}) {
+  const spec = levelSpec(level, mods);
   const v = launchSpeed(level);
   const dist = trackLength(level, mods);
   return {
     level: level + 1,
-    sticks: sticksFor(level),
-    gapSec: +gapFor(level, mods).toFixed(2),
-    gate: Math.round(gateFor(level, mods)),
+    sticks: spec.sticks,
+    gateWide: Math.round(spec.gateWide),
+    gateTight: Math.round(spec.gateTight),
+    tightShare: +spec.tightShare.toFixed(2),
+    room: +spec.room.toFixed(2),
+    cadence: +spec.cadence.toFixed(2),
     speed: Math.round(v),
     kmh: +(v * SPEED.kmhScale).toFixed(1),
     distance: dist,

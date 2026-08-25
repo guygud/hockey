@@ -4,7 +4,7 @@
 // Единственный модуль, который рисует. Состояние он только читает — ничего в
 // S не пишет, поэтому порядок отрисовки можно менять свободно.
 //
-// Порядок кадра: арена → лёд → декор → ворота → шайба → клюшки (дальние
+// Порядок кадра: арена → лёд → декор → ворота и вратарь → шайба → фигуры (дальние
 // первыми) → частицы и штрихи → капот шайбы → виньетка и вспышки → подсказки.
 // ============================================================================
 
@@ -12,14 +12,22 @@ import {
   ARENA,
   BEAT,
   CAM,
+  CINEMA,
+  CONES,
   CORRIDOR,
+  CUTOUT,
   GOAL,
+  GOALIE,
   HEAT,
   LENS,
+  PLAYER,
+  PLAYER_EASY,
+  SKATERS,
+  STRIKER,
   SPEED_LINES,
-  STICK,
 } from "./tuning.js";
-import { imgReady, imgs, konkiSprite } from "./assets.js";
+import { JUMP } from "./balance.js";
+import { imgReady, imgs } from "./assets.js";
 import { ctx } from "./dom.js";
 import {
   arenaCover,
@@ -42,8 +50,6 @@ import { W, H, isTouchUi } from "./viewport.js";
 const drawQueue = [];
 const skaterQueue = [];
 
-const shellRgba = (a) => `rgba(${hexToRgbStr(theme().shell)},${a})`;
-
 // ---------------------------------------------------------------------------
 // Арена и лёд
 // ---------------------------------------------------------------------------
@@ -59,20 +65,19 @@ function drawArenaStrip() {
   const cover = arenaCover();
   ctx.fillRect(cover.x, 0, cover.w, horizon + 2);
 
-  // Стеновая панель за воротами, поверх неё — гнутый борт.
   const boardA = 0.85 + 0.15 * pushMix();
-  if (imgReady(imgs.borderTop)) {
+  if (imgReady(imgs.tribune)) {
     ctx.save();
-    ctx.globalAlpha = 0.95 * boardA;
-    ctx.drawImage(imgs.borderTop, cover.x, horizon - ARENA.wallH * 0.92, cover.w, ARENA.wallH);
+    ctx.globalAlpha = 0.98 * boardA;
+    ctx.drawImage(imgs.tribune, cover.x, 0, cover.w, horizon);
     ctx.restore();
   }
   if (imgReady(imgs.board)) {
     ctx.save();
     ctx.globalAlpha = 0.96 * boardA;
-    ctx.drawImage(imgs.board, cover.x, horizon - ARENA.boardH * 0.72, cover.w, ARENA.boardH);
+    ctx.drawImage(imgs.board, cover.x, horizon - ARENA.boardH * 0.55, cover.w, ARENA.boardH);
     ctx.restore();
-  } else if (!imgReady(imgs.borderTop)) {
+  } else if (!imgReady(imgs.tribune)) {
     ctx.strokeStyle = "rgba(250, 180, 255, 0.35)";
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -100,28 +105,14 @@ function drawFloor() {
   // достаётся только воротам, коридору и эмодзи на плоскости.
   if (imgReady(imgs.ice)) ctx.drawImage(imgs.ice, 0, iceY, W, iceH);
 
-  if (imgReady(imgs.iceColor)) {
-    ctx.save();
-    ctx.globalAlpha = pal.tint[0];
-    ctx.globalCompositeOperation = "multiply";
-    ctx.drawImage(imgs.iceColor, 0, iceY, W, iceH);
-    ctx.restore();
-  }
-  if (imgReady(imgs.iceColor2)) {
-    ctx.save();
-    ctx.globalAlpha = pal.tint[1];
-    ctx.globalCompositeOperation = "screen";
-    ctx.drawImage(imgs.iceColor2, 0, iceY, W, iceH);
-    ctx.restore();
-  }
-
   // Полосы от коньков — главный индикатор скорости на пустом льду.
   const speedBoost = 0.8 + 0.5 * speedMix();
   const start = Math.floor((S.puck.z - rig().back) / CORRIDOR.ribStep) * CORRIDOR.ribStep;
+  const lineRgb = theme().lines;
   for (let i = 0; i < 70; i++) {
     const p = project(0, start + i * CORRIDOR.ribStep, true);
     if (!p) continue;
-    ctx.strokeStyle = `rgba(255,230,255,${Math.max(0.03, 0.22 - i * 0.004) * speedBoost})`;
+    ctx.strokeStyle = `rgba(${lineRgb},${Math.max(0.03, 0.14 - i * 0.003) * speedBoost})`;
     ctx.lineWidth = Math.max(1, p.k * 1.2);
     ctx.beginPath();
     ctx.moveTo(0, p.sy);
@@ -165,29 +156,31 @@ function drawIceMarks() {
   ctx.restore();
 }
 
-const byZOffDesc = (a, b) => b.zOff - a.zOff;
+const byZOffDesc = (a, b) => b.z - a.z;
+
+function extraProfile() {
+  return {
+    worldW: SKATERS.worldW,
+    bladeX: PLAYER.bladeX,
+    bladeY: PLAYER.bladeY,
+    feetX: PLAYER.feetX,
+    feetY: PLAYER.feetY,
+    maxScreenFrac: SKATERS.maxScreenFrac,
+  };
+}
 
 function drawSkaters() {
-  const sprite = konkiSprite();
-  if (!sprite || S.skaters.length === 0) return;
-  const ratio = sprite.height / sprite.width;
+  if (S.skaters.length === 0) return;
   skaterQueue.length = 0;
   for (const s of S.skaters) skaterQueue.push(s);
   skaterQueue.sort(byZOffDesc);
 
   for (const s of skaterQueue) {
-    const p = project(s.x, S.puck.z + s.zOff, true);
-    if (!p) continue;
-    // Ближний план намеренно шире экрана: видно только лезвие, и оно летит.
-    const w = s.near ? W * 1.08 : Math.min(W * 0.34, Math.max(88, 230 * p.k));
-    if (p.sx + w / 2 < -20 || p.sx - w / 2 > W + 20) continue;
-    const h = w * ratio;
-    const fade = Math.max(0.25, Math.min(1, (p.sx + w / 2) / 80, (W + w / 2 - p.sx) / 80));
-    ctx.save();
-    ctx.globalAlpha = (s.near ? 0.96 : 0.92) * fade;
-    ctx.translate(p.sx, p.sy);
-    ctx.drawImage(sprite, -w / 2, -h * 0.75, w, h);
-    ctx.restore();
+    const img = s.x < 0 ? imgs.comradeLeft : imgs.comrade;
+    if (!imgReady(img)) continue;
+    const face = s.face ?? 0;
+    drawShadow(s.x, s.z, 18 * (0.3 + 0.7 * face), 1);
+    drawFigure(img, s.x, s.z, extraProfile(), 0.96, face);
   }
 }
 
@@ -275,12 +268,46 @@ function drawGoal() {
 }
 
 function drawShadow(x, z, rx, rzScale) {
-  const p = project(x, z);
+  const p = project(x, z, true);
   if (!p) return;
   ctx.fillStyle = "rgba(0,0,0,0.22)";
   ctx.beginPath();
   ctx.ellipse(p.sx, p.sy, Math.max(4, rx * p.k), Math.max(2, rx * 0.35 * p.k * (rzScale || 1)), 0, 0, Math.PI * 2);
   ctx.fill();
+}
+
+function drawStriker() {
+  const cin = S.cinema;
+  if (!cin || cin.mode !== "intro" || S.outside <= 0.02) return;
+  const img = imgs.comrade;
+  if (!S.puck || !imgReady(img)) return;
+  const strike = cin.strike ?? 0;
+  const wobble = cin.wobble ?? 0;
+  const yaw0 = ((90 - CINEMA.introOpenDeg) * Math.PI) / 180;
+  const yaw1 = (CINEMA.introBackDeg * Math.PI) / 180;
+  const wobbleRad = (CINEMA.introWobbleDeg * Math.PI) / 180;
+  const yaw = yaw0 + strike * (yaw1 - yaw0) + wobble * wobbleRad;
+  const c = Math.cos(yaw);
+  const mag = Math.max(CUTOUT.minEdge, Math.abs(c));
+  const scale = (c < 0 ? -1 : 1) * mag;
+  const px = cin.plantX ?? S.puck.x ?? 0;
+  const pz = cin.plantZ ?? S.puck.z;
+  const reach = STRIKER.worldW * (STRIKER.feetX - STRIKER.bladeX);
+  const feetX = px - reach - (1 - strike) * CINEMA.introStandGap;
+  const feet = project(feetX, pz, true);
+  if (!feet) return;
+  const w = Math.max(36, Math.min(W * STRIKER.maxScreenFrac, STRIKER.worldW * feet.k));
+  const h = w * (img.naturalHeight / Math.max(1, img.naturalWidth));
+  const dx = feet.sx - STRIKER.feetX * w;
+  const dy = feet.sy - STRIKER.feetY * h;
+  drawShadow(feetX, pz, 14 * (0.35 + 0.45 * strike), 1);
+  ctx.save();
+  ctx.globalAlpha = S.outside;
+  ctx.translate(feet.sx, 0);
+  ctx.scale(scale, 1);
+  ctx.translate(-feet.sx, 0);
+  ctx.drawImage(img, dx, dy, w, h);
+  ctx.restore();
 }
 
 /** Шайба как объект мира — только когда глаз снаружи неё. */
@@ -296,11 +323,11 @@ function drawPuckBody() {
   ctx.save();
   ctx.globalAlpha = Math.min(1, S.outside);
   if (imgReady(imgs.puck)) {
-    const w = Math.max(28, 52 * base.k);
+    const w = Math.max(48, 115 * base.k);
     const h = w * (imgs.puck.naturalHeight / imgs.puck.naturalWidth);
     const lifted = projectHeight(px, S.puck.z, 13 + py);
     const sy = lifted ? lifted.sy : base.sy;
-    ctx.drawImage(imgs.puck, base.sx - w / 2, sy - h * 0.5, w, h);
+    ctx.drawImage(imgs.puck, base.sx - w / 2, sy - h * 0.55, w, h);
   } else {
     const top = projectHeight(px, S.puck.z, 13 + py);
     if (top) {
@@ -320,73 +347,34 @@ function drawPuckBody() {
 }
 
 // ---------------------------------------------------------------------------
-// Клюшки — стоят на месте, читаются по занятой полосе на льду
+// Фигуры хоккеистов — стоят на льду, якорь в крюке
 // ---------------------------------------------------------------------------
-
-const stickSprite = (foe, side) =>
-  side < 0 ? (foe ? imgs.redLeft : imgs.blueLeft) : foe ? imgs.redRight : imgs.blueRight;
 
 function slipProgress(obs) {
   if (!obs.resolved) return 0;
   const from = obs.slipZ != null ? obs.slipZ : obs.z;
-  return clamp01((S.puck.z - from) / STICK.slipSpan);
+  return clamp01((S.puck.z - from) / PLAYER.slipSpan);
 }
 
 function passAlpha(slip, d) {
+  if (S.poseMode) return 1;
   return Math.pow(Math.max(0, 1 - slip), 0.9) * clamp01((d - CAM.near) / 70);
 }
 
-function drawTiltedStick(img, tipX, tipZ, side, swing, alpha, appearDeg, stopDeg, lenMul = 1, tipH = STICK.tipHeight) {
-  if (!imgReady(img)) return null;
-  const tip = projectHeight(tipX, tipZ, tipH);
-  if (!tip) return null;
-  const drawW = Math.max(28, Math.min(W * STICK.maxScreenFrac, STICK.worldLen * lenMul * tip.k));
-  const drawH = drawW * (img.naturalHeight / Math.max(1, img.naturalWidth));
-  const a = appearDeg * (Math.PI / 180);
-  const b = stopDeg * (Math.PI / 180);
-  const tiltRad = a + (b - a) * clamp01(swing);
-
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.translate(tip.sx, tip.sy);
-  ctx.rotate(side < 0 ? -tiltRad : tiltRad);
-  if (side < 0) ctx.drawImage(img, -drawW, -drawH / 2, drawW, drawH);
-  else ctx.drawImage(img, 0, -drawH / 2, drawW, drawH);
-  ctx.restore();
-  return tip;
-}
-
-function stickPalette(kind, hot) {
-  if (kind === "boost") {
-    return {
-      shaft: hot ? "#4fc9ff" : "#2a6b8c",
-      glow: hot ? "rgba(90,205,255,0.28)" : "rgba(70,160,210,0.16)",
-      spark: "190,240,255",
-      ice: "90,200,255",
-    };
-  }
-  return {
-    shaft: hot ? "#c43a52" : "#8e1c30",
-    glow: hot ? "rgba(220,70,90,0.22)" : "rgba(180,50,70,0.14)",
-    spark: "255,140,155",
-    ice: "255,70,100",
-  };
-}
-
-function drawTipGlow(p, pal, scale) {
-  const r = Math.max(5, 11 * p.k * (scale || 1));
-  const g = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, r);
-  g.addColorStop(0, pal.glow);
-  g.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2);
-  ctx.fill();
+function nearFade(obs) {
+  if (S.poseMode) return 1;
+  const d = obs.z - S.puck.z;
+  if (d >= PLAYER.nearFade) return 1;
+  return 0.15 + 0.85 * clamp01(d / PLAYER.nearFade);
 }
 
 function nearFactor(obs) {
   const d = obs.z - S.puck.z;
   return clamp01(1 - (d - 80) / 520);
+}
+
+function iceRgb(kind) {
+  return kind === "boost" ? "90,200,255" : "255,70,100";
 }
 
 /** Занятая полоса на льду: красная зона объезда / синие ворота. */
@@ -411,102 +399,218 @@ function drawIceBand(obs, rgb, alpha) {
   ctx.lineTo(br.sx, br.sy);
   ctx.lineTo(bl.sx, bl.sy);
   ctx.closePath();
-  ctx.fillStyle = `rgba(${rgb},0.72)`;
+  ctx.fillStyle = `rgba(${rgb},${S.poseMode ? 0.55 : 0.72})`;
   ctx.fill();
   ctx.restore();
 }
 
-function drawStickFallback(side, tipZ, tip, pal, alpha, thickness, originX = 0, tipH = 18) {
-  const grip = projectHeight(originX + side * CORRIDOR.halfW * 1.45, tipZ, tipH);
-  if (!grip) return;
+function drawVertArrow(x, z, worldH, worldW, alpha) {
+  const base = project(x, z, true);
+  const top = projectHeight(x, z, worldH, true);
+  if (!base || !top) return;
+  const sx = base.sx;
+  const by = base.sy;
+  const ty = top.sy;
+  const hw = worldW * 0.5 * base.k;
+  const headY = ty + (by - ty) * 0.55;
+  const stem = hw * 0.34;
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.strokeStyle = pal.shaft;
-  ctx.lineWidth = Math.min(STICK.nearWidthCap, Math.max(3, thickness * tip.k));
-  ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(grip.sx, grip.sy);
-  ctx.lineTo(tip.sx, tip.sy);
+  ctx.moveTo(sx, ty);
+  ctx.lineTo(sx + hw, headY);
+  ctx.lineTo(sx + stem, headY);
+  ctx.lineTo(sx + stem, by);
+  ctx.lineTo(sx - stem, by);
+  ctx.lineTo(sx - stem, headY);
+  ctx.lineTo(sx - hw, headY);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(40, 255, 80, 0.78)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(210, 255, 190, 0.95)";
+  ctx.lineWidth = Math.max(2, 2.6 * base.k);
   ctx.stroke();
   ctx.restore();
+}
+
+function drawBoostArrows(obs) {
+  if (obs.resolved && obs.ok) return;
+  const sample = project(obs.x, obs.z, true);
+  if (!sample) return;
+  const fade = passAlpha(slipProgress(obs), sample.d);
+  const near = 0.45 + 0.55 * nearFactor(obs);
+  const a = 0.82 * fade * near;
+  if (a < 0.04) return;
+  const span = obs.w * 0.36;
+  const xs = obs.w < 70 ? [obs.x] : [obs.x - span, obs.x, obs.x + span];
+  for (const x of xs) {
+    drawVertArrow(x, obs.z, 86, 28, a);
+  }
 }
 
 function innerEdge(obs) {
   return obs.x + (obs.x < 0 ? obs.w / 2 : -obs.w / 2);
 }
 
-function drawOneStick(side, tipX, tipZ, pal, alpha, foe, swing, appear, stop, tipH) {
-  drawShadow(tipX, tipZ, 18, 1.05);
-  const tip = projectHeight(tipX, tipZ, tipH);
-  if (!tip) return;
+function enemyImg(side, easy) {
+  if (easy) return side < 0 ? imgs.enemyEasyLeft : imgs.enemyEasyRight;
+  return side < 0 ? imgs.enemyLeft : imgs.enemy;
+}
+
+function comradeImg(side) {
+  return side < 0 ? imgs.comradeLeft : imgs.comrade;
+}
+
+/** Крюк в левой части кадра спрайта — не путать с суффиксом файла. */
+function hookLeftOf(img) {
+  return img === imgs.enemy || img === imgs.enemyEasyRight || img === imgs.comrade;
+}
+
+const backPlates = new WeakMap();
+
+function tintedSprite(img, color) {
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth;
+  c.height = img.naturalHeight;
+  const g = c.getContext("2d");
+  g.drawImage(img, 0, 0);
+  g.globalCompositeOperation = "source-in";
+  g.fillStyle = color;
+  g.fillRect(0, 0, c.width, c.height);
+  return c;
+}
+
+function backPlate(img) {
+  let plate = backPlates.get(img);
+  if (plate) return plate;
+  const fill = tintedSprite(img, CUTOUT.backTint);
+  const edge = tintedSprite(img, CUTOUT.backEdge);
+  plate = document.createElement("canvas");
+  plate.width = img.naturalWidth;
+  plate.height = img.naturalHeight;
+  const g = plate.getContext("2d");
+  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+    g.drawImage(edge, dx, dy);
+  }
+  g.drawImage(fill, 0, 0);
+  backPlates.set(img, plate);
+  return plate;
+}
+
+function drawFigure(img, tipX, tipZ, profile, alpha, face = 1, maxAngle = CUTOUT.maxAngle, hingeHook = false) {
+  if (!imgReady(img)) return null;
+  const tip = project(tipX, tipZ, true);
+  if (!tip) return null;
+  const w = Math.max(36, Math.min(W * profile.maxScreenFrac, profile.worldW * tip.k));
+  const h = w * (img.naturalHeight / Math.max(1, img.naturalWidth));
+  const leftHook = hookLeftOf(img);
+  const bx = leftHook ? profile.bladeX : 1 - profile.bladeX;
+  const fx = leftHook ? profile.feetX : 1 - profile.feetX;
+  const dx = tip.sx - bx * w;
+  const dy = tip.sy - profile.bladeY * h;
+  const pivot = dx + (hingeHook ? bx : fx) * w;
+  const t = Math.max(0, Math.min(1, face));
+  const c = Math.cos((1 - t) * maxAngle);
+  const mag = Math.max(CUTOUT.minEdge, Math.abs(c));
+  const scale = (c < 0 ? -1 : 1) * mag;
+  const sprite = c <= 0 ? backPlate(img) : img;
   ctx.save();
   ctx.globalAlpha = alpha;
-  drawTipGlow(tip, pal, foe ? 0.85 : 0.7);
+  ctx.translate(pivot, 0);
+  ctx.scale(scale, 1);
+  ctx.translate(-pivot, 0);
+  ctx.drawImage(sprite, dx, dy, w, h);
   ctx.restore();
-  const drawn = drawTiltedStick(stickSprite(foe, side), tipX, tipZ, side, swing, alpha, appear, stop, 1, tipH);
-  if (!drawn) drawStickFallback(side, tipZ, tip, pal, alpha, 7, 0, tipH);
+  return tip;
+}
+
+function blockTipX(obs) {
+  const side = obs.x < 0 ? -1 : 1;
+  const whip = obs.ok ? (2 - slipProgress(obs)) * slipProgress(obs) * PLAYER.dodgeWhip * CORRIDOR.halfW * 0.45 : 0;
+  const pull = obs.easy ? PLAYER_EASY.boardPull : PLAYER.boardPull;
+  return innerEdge(obs) + side * (whip + pull);
+}
+
+function drawShoulderMate(obs, tipZ, profile, alpha, face) {
+  const side = obs.x < 0 ? -1 : 1;
+  const mx = side * (CORRIDOR.halfW + PLAYER.mateOut);
+  const mz = tipZ + PLAYER.mateAhead;
+  const img = side < 0 ? imgs.comradeLeft : imgs.comrade;
+  drawShadow(mx, mz, 20 * (0.3 + 0.7 * face), 1);
+  drawFigure(img, mx, mz, profile, alpha * 0.95, face);
 }
 
 function drawBlock(obs) {
   const slip = slipProgress(obs);
-  const side = obs.x < 0 ? -1 : 1;
-  const whip = obs.ok ? (2 - slip) * slip * STICK.dodgeWhip * CORRIDOR.halfW * 0.45 : 0;
-  const tipX = innerEdge(obs) + side * whip;
-  const tipZ = obs.z + STICK.tipZOffset;
-  const pal = stickPalette("block", !obs.resolved);
-  const tip = projectHeight(tipX, tipZ, STICK.tipHeight);
+  const tipX = blockTipX(obs);
+  const tipZ = obs.z + PLAYER.tipZOffset;
+  const tip = project(tipX, tipZ, true);
   if (!tip) return;
-  const alpha = passAlpha(slip, tip.d);
-  drawIceBand(obs, pal.ice, 0.55);
-  drawOneStick(side, tipX, tipZ, pal, alpha, true, 0.92, STICK.angleAppearDeg, STICK.angleStopDeg, STICK.tipHeight);
+  const alpha = passAlpha(slip, tip.d) * nearFade(obs);
+  const profile = obs.easy ? PLAYER_EASY : PLAYER;
+  const side = obs.x < 0 ? -1 : 1;
+  const face = obs.face ?? 0;
+  drawIceBand(obs, iceRgb("block"), S.poseMode ? 0.7 : 0.28);
+  drawShadow(tipX, tipZ, 22 * (0.3 + 0.7 * face), 1.05);
+  drawFigure(enemyImg(side, obs.easy), tipX, tipZ, profile, alpha, face);
+  if (obs.mate) drawShoulderMate(obs, tipZ, profile, alpha, face);
 }
 
-/** Две красные навстречу друг другу — прыжок. Как лобовая пара в dodge-design. */
+function drawLowBands(obs) {
+  const halfLane = CORRIDOR.halfW * JUMP.laneFrac;
+  const left = { ...obs, x: (-CORRIDOR.halfW - halfLane) / 2, w: CORRIDOR.halfW - halfLane };
+  const right = { ...obs, x: (CORRIDOR.halfW + halfLane) / 2, w: CORRIDOR.halfW - halfLane };
+  const mid = { ...obs, x: 0, w: halfLane * 2 };
+  drawIceBand(left, iceRgb("low"), S.poseMode ? 0.55 : 0.32);
+  drawIceBand(right, iceRgb("low"), S.poseMode ? 0.55 : 0.32);
+  drawIceBand(mid, "120,210,255", S.poseMode ? 0.35 : 0.16);
+}
+
+/** Две красные навстречу друг другу — прыжок только в центральной полосе. */
 function drawLow(obs) {
-  const swing = 0.92;
   const slip = slipProgress(obs);
-  const tipZ = obs.z + STICK.tipZOffset;
-  const pal = stickPalette("low", !obs.resolved);
-  const sample = projectHeight(obs.x, tipZ, STICK.tipHeight);
+  const tipZ = obs.z + PLAYER.tipZOffset;
+  const sample = project(obs.x, tipZ, true);
   if (!sample) return;
-  const alpha = passAlpha(slip, sample.d);
-  drawIceBand(obs, pal.ice, 0.6);
-  drawShadow(obs.x, obs.z, 32, 0.55);
+  const alpha = passAlpha(slip, sample.d) * nearFade(obs);
+  const face = obs.face ?? 0;
+  drawLowBands(obs);
+  drawShadow(obs.x, obs.z, 32 * (0.3 + 0.7 * face), 0.55);
   const push = obs.ok ? slip * 1.55 : slip * 0.12;
   for (const side of [-1, 1]) {
-    const tipX = obs.x + side * (CORRIDOR.halfW * (1.05 - swing * 1.05 + push));
-    drawOneStick(side, tipX, tipZ, pal, alpha, true, swing, STICK.crossAppearDeg, STICK.crossStopDeg, STICK.tipHeight);
+    const tipX = obs.x + side * (CORRIDOR.halfW * (PLAYER.jumpSpread + push * 0.35));
+    drawFigure(enemyImg(side, false), tipX, tipZ, PLAYER, alpha, face);
   }
 }
 
 function drawBoost(obs) {
   const slip = slipProgress(obs);
-  const tipZ = obs.z + STICK.tipZOffset;
-  const pal = stickPalette("boost", !obs.resolved);
-  const sample = projectHeight(obs.x, tipZ, STICK.tipHeight);
+  const tipZ = obs.z + PLAYER.tipZOffset;
+  const sample = project(obs.x, tipZ, true);
   if (!sample) return;
-  const alpha = passAlpha(slip, sample.d);
-  drawIceBand(obs, pal.ice, 0.38);
+  const alpha = passAlpha(slip, sample.d) * nearFade(obs);
+  const face = obs.face ?? 0;
+  const allyMax = ((90 - CUTOUT.allyOpenDeg) * Math.PI) / 180;
+  drawBoostArrows(obs);
   const push = obs.ok ? slip * 36 : 0;
   for (const side of [-1, 1]) {
-    const tipX = obs.x + side * (obs.w / 2) + side * push;
-    drawOneStick(side, tipX, tipZ, pal, alpha, false, 0.9, STICK.teamAppearDeg, STICK.teamStopDeg, STICK.tipHeight);
+    const tipX = obs.x + side * CORRIDOR.halfW * PLAYER.allyEdge + side * push;
+    drawShadow(tipX, tipZ, 16 * (0.5 + 0.5 * face), 1);
+    drawFigure(comradeImg(side), tipX, tipZ, PLAYER, alpha, face, allyMax, true);
   }
-  if (obs.ok && slip > 0 && slip < 0.85) {
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.strokeStyle = `rgba(${pal.spark},${0.55 * (1 - slip)})`;
-    ctx.lineWidth = Math.max(1.5, 2.2 * sample.k);
-    ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const ang = (i / 6) * Math.PI * 2 + slip * 6;
-      const r = (6 + slip * 26) * sample.k;
-      ctx.moveTo(sample.sx, sample.sy);
-      ctx.lineTo(sample.sx + Math.cos(ang) * r, sample.sy + Math.sin(ang) * r * 0.6);
-    }
-    ctx.stroke();
-    ctx.restore();
-  }
+}
+
+function drawCone(cone) {
+  if (!imgReady(imgs.conus)) return;
+  const p = project(cone.x, cone.z, true);
+  if (!p) return;
+  const w = Math.max(6, Math.min(W * CONES.maxScreenFrac, CONES.worldW * p.k));
+  const h = w * (imgs.conus.naturalHeight / Math.max(1, imgs.conus.naturalWidth));
+  const fade = p.d >= CONES.nearFade ? 1 : 0.12 + 0.88 * clamp01(p.d / CONES.nearFade);
+  ctx.save();
+  ctx.globalAlpha = fade;
+  ctx.drawImage(imgs.conus, p.sx - w / 2, p.sy - h * 0.96, w, h);
+  ctx.restore();
 }
 
 function drawObstacle(obs) {
@@ -515,20 +619,81 @@ function drawObstacle(obs) {
   else drawBlock(obs);
 }
 
+function drawPoseCaption() {
+  if (!S.poseMode) return;
+  ctx.save();
+  ctx.font = '600 13px "Segoe UI", system-ui, sans-serif';
+  const text = "POSE  ·  тестовый заезд";
+  const tw = ctx.measureText(text).width;
+  ctx.fillStyle = "rgba(20, 30, 50, 0.72)";
+  ctx.fillRect(12, H - 48, tw + 24, 32);
+  ctx.fillStyle = "#fff8e0";
+  ctx.fillText(text, 24, H - 27);
+  ctx.restore();
+}
+
+function drawGoalie() {
+  if (!imgReady(imgs.gater)) return;
+  const face = S.goalieFace || 0;
+  if (face < 0.03) return;
+  const netZ = S.runDist;
+  const z = netZ - GOALIE.zBack;
+  const x = S.goalieX || 0;
+  const half = 100;
+  const postL = projectHeight(-half, netZ, GOAL.postHeight, true);
+  const baseL = project(-half, netZ, true);
+  const baseR = project(half, netZ, true);
+  if (!postL || !baseL || !baseR) return;
+
+  const goalH = Math.max(24, Math.abs(baseL.sy - postL.sy) * 1.25);
+  const goalY = postL.sy - goalH * 0.08 + goalH * GOAL.yDownFrac;
+  const iceY = goalY + goalH * 0.97;
+  const h = goalH * GOALIE.size;
+  const w = h * (imgs.gater.naturalWidth / imgs.gater.naturalHeight) * GOALIE.widthScale;
+  const mid = (baseL.sx + baseR.sx) / 2;
+  const sx = mid + (x / half) * ((baseR.sx - baseL.sx) / 2);
+  const dir = S.goalieDir < 0 ? -1 : 1;
+  const c = Math.cos((1 - face) * CUTOUT.maxAngle);
+  const mag = Math.max(CUTOUT.minEdge, Math.abs(c));
+  const yaw = (c < 0 ? -1 : 1) * mag;
+  const sprite = c <= 0 ? backPlate(imgs.gater) : imgs.gater;
+  const alpha = 0.2 + 0.78 * face;
+
+  drawShadow(x, z, 22 * (0.3 + 0.7 * face), 1.15);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(sx, 0);
+  ctx.scale(dir * yaw, 1);
+  ctx.translate(-sx, 0);
+  ctx.drawImage(sprite, sx - GOALIE.feetX * w, iceY - GOALIE.feetY * h, w, h);
+  ctx.restore();
+}
+
 // ---------------------------------------------------------------------------
 // Частицы и штрихи скорости
 // ---------------------------------------------------------------------------
 
-
 function drawParticles() {
+  const flash = imgs.flashs;
+  const ready = imgReady(flash);
+  const slice = ready ? flash.naturalWidth / 7 : 0;
   for (const p of S.particles) {
     const pr = project(p.x, p.z);
     if (!pr) continue;
     const a = p.life / p.max;
-    ctx.fillStyle = `rgba(255,255,255,${0.55 * a})`;
-    ctx.beginPath();
-    ctx.arc(pr.sx, pr.sy, Math.max(1, 3 * pr.k * a), 0, Math.PI * 2);
-    ctx.fill();
+    if (ready) {
+      const size = Math.max(8, 22 * pr.k * (0.45 + a));
+      const slot = Math.abs(Math.floor(p.x * 2.1 + p.z * 0.07)) % 7;
+      ctx.save();
+      ctx.globalAlpha = 0.75 * a;
+      ctx.drawImage(flash, slot * slice, 0, slice, flash.naturalHeight, pr.sx - size / 2, pr.sy - size / 2, size, size);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = `rgba(255,255,255,${0.55 * a})`;
+      ctx.beginPath();
+      ctx.arc(pr.sx, pr.sy, Math.max(1, 3 * pr.k * a), 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 
@@ -577,6 +742,15 @@ function drawSpeedStreaks() {
   if (a <= 0.02) return;
   const cx = W / 2;
   const cy = H * CAM.horizonFrac;
+  if (imgReady(imgs.speed)) {
+    const w = W * (0.85 + 0.4 * a);
+    const h = w * (imgs.speed.naturalHeight / Math.max(1, imgs.speed.naturalWidth));
+    ctx.save();
+    ctx.globalAlpha = 0.28 + 0.55 * a;
+    ctx.drawImage(imgs.speed, cx - w / 2, cy - h * 0.12, w, h);
+    ctx.restore();
+    return;
+  }
   ctx.strokeStyle = `rgba(225,248,255,${0.4 * a})`;
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -615,10 +789,11 @@ function drawHood() {
 
   ctx.save();
   hoodPath(metrics);
+  const hood = pal.hood || [pal.shell, pal.floor[1]];
   const body = ctx.createLinearGradient(0, top - bulge, 0, H);
-  body.addColorStop(0, shellRgba(0.92));
-  body.addColorStop(0.45, `rgba(${hexToRgbStr(pal.floor[1])},0.95)`);
-  body.addColorStop(1, shellRgba(1));
+  body.addColorStop(0, `rgba(${hexToRgbStr(hood[0])},0.92)`);
+  body.addColorStop(0.45, `rgba(${hexToRgbStr(hood[1])},0.95)`);
+  body.addColorStop(1, `rgba(${hexToRgbStr(hood[1])},1)`);
   ctx.fillStyle = body;
   ctx.fill();
   ctx.clip();
@@ -764,6 +939,8 @@ export function render() {
   drawLane();
   drawSkaters();
   drawGoal();
+  drawGoalie();
+  drawStriker();
   drawPuckBody();
 
   const backLimit = S.puck.z - rig().back - 30;
@@ -771,8 +948,14 @@ export function render() {
   for (const o of S.obstacles) {
     if (o.z > backLimit && slipProgress(o) < 1) drawQueue.push(o);
   }
+  for (const c of S.cones || []) {
+    if (c.z > backLimit) drawQueue.push(c);
+  }
   drawQueue.sort(byZDesc);
-  for (const obs of drawQueue) drawObstacle(obs);
+  for (const item of drawQueue) {
+    if (item.kind === "cone") drawCone(item);
+    else drawObstacle(item);
+  }
 
   drawParticles();
   drawSpeedLines();
@@ -791,6 +974,7 @@ export function render() {
   drawFrameTint();
   drawHitFlash();
   drawDamageFlash();
+  drawPoseCaption();
 
   if (!S.cinema) drawTapZones();
 }

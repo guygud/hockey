@@ -164,16 +164,30 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
+function jumpLaneHalf() {
+  return CORRIDOR.halfW * JUMP.laneFrac;
+}
+
+function inJumpLane(hx) {
+  return Math.abs(hx) <= jumpLaneHalf();
+}
+
 function contactOf(obs, hx, hy) {
   if (obs.kind === "low") {
+    if (hy >= JUMP.clear && inJumpLane(hx)) {
+      const heightClear = hy - JUMP.clear;
+      const edge = jumpLaneHalf() - Math.abs(hx);
+      return { hit: false, clip: false, graze: heightClear < GRAZE || edge < GRAZE };
+    }
     if (overlapsX(hx, obs)) {
-      if (hy >= JUMP.clear) {
-        const heightClear = hy - JUMP.clear;
-        return { hit: false, clip: false, graze: heightClear < GRAZE };
-      }
-      const heightMiss = JUMP.clear - hy;
+      const heightMiss = Math.max(0, JUMP.clear - hy);
       const pen = penetration(hx, obs);
-      return { hit: true, clip: heightMiss < CLIP.height || pen < CLIP.pen, graze: false };
+      const lanePen = Math.abs(hx) - jumpLaneHalf();
+      return {
+        hit: true,
+        clip: heightMiss < CLIP.height || pen < CLIP.pen || (lanePen > 0 && lanePen < CLIP.pen),
+        graze: false,
+      };
     }
     return { hit: false, clip: false, graze: lateralClear(hx, obs) < GRAZE };
   }
@@ -301,6 +315,18 @@ function jumpPhysics(dt) {
 }
 
 export function updatePuck(dt) {
+  if (S.poseMode) {
+    const prevZ = S.puck.z;
+    const prevX = S.puck.x || 0;
+    const prevY = S.puck.y || 0;
+    jumpPhysics(dt);
+    steer(dt);
+    S.puck.vz = speedFor(Math.max(0.45, S.mom));
+    S.puck.z += S.puck.vz * dt;
+    sweep(prevZ, prevX, prevY, S.puck.z, S.puck.x || 0, S.puck.y || 0);
+    return;
+  }
+
   applyMom(-drainRate() * dt);
 
   if (S.mom <= 0) {

@@ -36,6 +36,9 @@ export function makeObstacle(z, side, foe, opts = {}) {
     ok: false,
     answer: null,
     windowOpen: false,
+    aimX: 0,
+    /** puck.z в момент разрешения: от него отсчитывается проезд мимо. */
+    slipZ: null,
     flip: Math.random() < 0.5 ? -1 : 1,
     lesson: !!opts.lesson,
     free: !!opts.free,
@@ -84,6 +87,11 @@ function spawnDist(spawn) {
  */
 export function maybeSpawnObstacles() {
   if (S.finalSpawned) return;
+  // На удлинённом L0 иначе добьём коридор лишними клюшками.
+  if (S.stickCount >= sticksFor(S.level)) {
+    S.finalSpawned = true;
+    return;
+  }
   for (const o of S.obstacles) {
     if (!o.resolved && o.z > S.puck.z - 40) return;
   }

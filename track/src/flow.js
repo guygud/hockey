@@ -12,21 +12,22 @@
 //   жизни кончились      → полный сброс на первый уровень
 // ============================================================================
 
-import { AIM, MAX_LIVES, MOMENTUM, SPEED } from "./balance.js";
-import { CINEMA, FEEL, ICE_MARKS, TURN } from "./tuning.js";
-import { ROUNDS } from "./rounds.js";
+import { AIM, MAX_LIVES, MOMENTUM, PUCK, SPEED } from "./balance.js";
+import { CINEMA, FEEL, GOALIE, ICE_MARKS, TURN, goalieBodyWorld } from "./tuning.js";
+import { ROUND_NEUTRAL, ROUNDS } from "./rounds.js";
 import { S, emptyStats, mods } from "./state.js";
 import { ui } from "./dom.js";
 import { ensureAudio, sfx } from "./audio.js";
 import { clampTurn } from "./camera.js";
 import { invalidateHud, updateHud } from "./hud.js";
 import { spawnSparks, updateFx, updateParticles } from "./fx.js";
-import { buildCourse, creaseZ, seedIceMarks } from "./track.js";
+import { buildCourse, buildPoseCourse, creaseZ, seedCones, seedIceMarks } from "./track.js";
 import { speedFor } from "./drive.js";
 import { hideRating, showRating } from "./leaderboard.js";
-import { easeInOut } from "./util.js";
+import { easeInOut, clamp01 } from "./util.js";
 
-const INTRO_TIME = CINEMA.introHold + CINEMA.introDive;
+const INTRO_TIME =
+  CINEMA.introWindup + CINEMA.introSnap + CINEMA.introHold + CINEMA.introDive;
 
 // ---------------------------------------------------------------------------
 // Заезды
@@ -95,6 +96,16 @@ function debugStartLevel() {
   }
 }
 
+/** ?pose=1 — стенд позиционирования фигур: один противник, шайба стоит. */
+export function poseQuery() {
+  try {
+    const raw = new URLSearchParams(window.location.search).get("pose");
+    return raw != null && raw !== "" && raw !== "0" && raw !== "false";
+  } catch (err) {
+    return false;
+  }
+}
+
 /** keepLives / keepStreak: переживают попытку внутри одного сета из трёх жизней. */
 export function resetRun(opts = {}) {
   // Продолжение на том же банке жизней означает, что следующая попытка сложнее.
@@ -113,8 +124,10 @@ export function resetRun(opts = {}) {
     S.attempt = Math.max(S.attempt, forced + 1);
   }
 
-  S.activeRound = pickRound();
-  const course = buildCourse(S.level, mods(), INTRO_TIME);
+  S.poseMode = poseQuery();
+  S.activeRound = ROUND_NEUTRAL;
+  if (!S.poseMode) S.activeRound = pickRound();
+  const course = S.poseMode ? buildPoseCourse() : buildCourse(S.level, mods(), INTRO_TIME);
   S.runDist = course.runDist;
   S.mom = MOMENTUM.start;
   if (!opts.keepStreak) S.streak = 0;
@@ -124,7 +137,8 @@ export function resetRun(opts = {}) {
   S.obstacles = course.obstacles;
   S.particles.length = 0;
   S.skaters.length = 0;
-  S.iceMarks = seedIceMarks(S.runDist, (S.activeRound && S.activeRound.emojis) || ICE_MARKS.emojis);
+  S.iceMarks = S.poseMode ? [] : seedIceMarks(S.runDist, (S.activeRound && S.activeRound.emojis) || ICE_MARKS.emojis);
+  S.cones = seedCones(S.runDist);
   S.skaterTimer = 0;
 
   S.held.left = false;
@@ -139,9 +153,24 @@ export function resetRun(opts = {}) {
   S.pendingContinue = null;
   S.pendingAlt = null;
   S.phase = "play";
-  S.cinema = { mode: "intro", t: 0, whoosh: false };
-  S.outside = 1;
-  setCinemaActive(true);
+  if (S.poseMode) {
+    S.cinema = null;
+    S.outside = 0;
+    setCinemaActive(false);
+  } else {
+    S.cinema = {
+      mode: "intro",
+      t: 0,
+      whoosh: false,
+      hit: false,
+      strike: 0,
+      wobble: 0,
+      plantX: S.puck.x || 0,
+      plantZ: S.puck.z,
+    };
+    S.outside = 1;
+    setCinemaActive(true);
+  }
   setPaused(false);
 
   hideRating();
@@ -187,6 +216,12 @@ function resetFeel() {
   S.beatT = 0;
   S.beatIdx = 0;
   S.beatPulse = 0;
+  S.goalieX = 0;
+  S.goalieT = 0;
+  S.goalieTarget = 0;
+  S.goalieHold = 0.45;
+  S.goalieDir = 1;
+  S.goalieFace = 0;
 }
 
 /** Назад на титульный экран. */
@@ -256,8 +291,10 @@ function beginCinema(mode, extra) {
 export function startGoalCam() {
   if (S.phase !== "play") return;
   S.phase = "goalcam";
-  S.streak += 1;
-  S.goals += 1;
+  if (!S.poseMode) {
+    S.streak += 1;
+    S.goals += 1;
+  }
   sfx.crease();
   // Пол скорости броска: даже вялый финиш должен смотреться как щелчок.
   beginCinema("goal", { flightVz: Math.max(S.puck.vz * 1.25, SPEED.min * 1.8, 420), hitNet: false });
@@ -285,14 +322,41 @@ export function startMissCam() {
   updateHud();
 }
 
+export function startSaveCam() {
+  if (S.phase !== "play") return;
+  S.phase = "misscam";
+  sfx.hit(false);
+  spawnSparks(18);
+  S.tremble = Math.max(S.tremble, 0.8);
+  S.hitFlash = 0.75;
+  S.wobble = Math.max(S.wobble, 0.85);
+  const side = Math.sign((S.puck.x || 0) - (S.goalieX || 0)) || (S.goalieDir < 0 ? -1 : 1);
+  beginCinema("save", {
+    flightVz: Math.max(S.puck.vz * 1.05, SPEED.min * 1.4, 320),
+    bounceDir: side,
+    hitGoalie: false,
+  });
+  S.camZVel += 160;
+  S.hoodBobVel += 70;
+  updateHud();
+}
+
 export function startStallCam() {
   if (S.phase !== "play") return;
+  if (S.poseMode) {
+    resetRun({});
+    return;
+  }
   S.phase = "stallcam";
   sfx.stall();
   beginCinema("stall");
 }
 
 function finishGoalReport() {
+  if (S.poseMode) {
+    resetRun({});
+    return;
+  }
   S.phase = "scored";
   showReport({
     title: "Гол!",
@@ -304,6 +368,10 @@ function finishGoalReport() {
 }
 
 function finishAttemptFail(title) {
+  if (S.poseMode) {
+    resetRun({});
+    return;
+  }
   S.lives = Math.max(0, S.lives - 1);
 
   if (S.lives <= 0) {
@@ -360,17 +428,45 @@ export function updateCinema(dt) {
   cin.t += dt;
 
   if (cin.mode === "intro") {
-    if (cin.t < CINEMA.introHold) {
+    const windup = CINEMA.introWindup;
+    const snapEnd = windup + CINEMA.introSnap;
+    const holdEnd = snapEnd + CINEMA.introHold;
+    if (cin.t < windup) {
       S.outside = 1;
-    } else if (cin.t < INTRO_TIME) {
-      if (!cin.whoosh) {
-        cin.whoosh = true;
-        sfx.flyIn();
-      }
-      S.outside = 1 - easeInOut((cin.t - CINEMA.introHold) / CINEMA.introDive);
+      cin.strike = 0;
+      cin.wobble = 0;
+    } else if (cin.t < snapEnd) {
+      S.outside = 1;
+      const u = clamp01((cin.t - windup) / CINEMA.introSnap);
+      cin.strike = Math.pow(u, CINEMA.introStrikePow);
+      cin.wobble = 0;
     } else {
-      S.outside = 0;
-      endCinema(() => {});
+      cin.strike = 1;
+      const after = cin.t - snapEnd;
+      cin.wobble =
+        Math.exp(-CINEMA.introWobbleDecay * after) *
+        Math.cos(after * CINEMA.introWobbleHz * Math.PI * 2);
+      if (!cin.hit) {
+        cin.hit = true;
+        spawnSparks(22);
+        sfx.hit(true);
+        S.hitFlash = 0.6;
+        S.hitFlashPerfect = true;
+        S.tremble = Math.max(S.tremble, 0.62);
+      }
+      if (cin.t < holdEnd) {
+        S.outside = 1;
+      } else if (cin.t < INTRO_TIME) {
+        if (!cin.whoosh) {
+          cin.whoosh = true;
+          sfx.flyIn();
+        }
+        S.outside = 1 - easeInOut((cin.t - holdEnd) / CINEMA.introDive);
+      } else {
+        S.outside = 0;
+        cin.strike = 1;
+        endCinema(() => {});
+      }
     }
     return "intro";
   }
@@ -411,6 +507,29 @@ export function updateCinema(dt) {
     return "block";
   }
 
+  if (cin.mode === "save") {
+    S.outside = Math.min(1, easeInOut(cin.t / CINEMA.goalPop) * 1.15);
+    const stopZ = S.runDist - GOALIE.zBack;
+    if (!cin.hitGoalie) {
+      S.puck.z += cin.flightVz * CINEMA.goalRush * (0.85 + 1.2 * Math.min(1, cin.t / 0.22)) * dt;
+      if (S.puck.z >= stopZ) {
+        cin.hitGoalie = true;
+        S.puck.z = stopZ;
+        spawnSparks(28);
+        sfx.fail();
+        S.hitFlash = 1;
+        S.wobble = Math.max(S.wobble, 1);
+        S.camZVel += 90;
+      }
+    } else {
+      S.puck.z = stopZ;
+      S.puck.x += cin.bounceDir * 70 * dt;
+    }
+    cinemaTail(dt);
+    if (cin.t >= CINEMA.saveDur) endCinema(() => finishAttemptFail("Вратарь!"));
+    return "block";
+  }
+
   if (cin.mode === "stall") {
     S.outside = easeInOut(Math.min(1, cin.t / CINEMA.stallDur));
     S.puck.vz = Math.max(0, S.puck.vz * Math.pow(0.05, dt));
@@ -423,9 +542,17 @@ export function updateCinema(dt) {
   return null;
 }
 
-/** Гол засчитывается на пятаке; сбитый прицел там же решает, промах это или нет. */
+function goalieBlocks() {
+  const px = S.puck.x || 0;
+  const { left, right } = goalieBodyWorld(S.goalieX || 0, S.goalieDir);
+  const r = PUCK.radius;
+  return px + r > left && px - r < right;
+}
+
+/** На пятаке: мимо ворот, сейв вратаря или гол. */
 export function checkGoalLine() {
   if (S.puck.z < creaseZ(S.runDist)) return;
   if (S.aim >= AIM.miss) startMissCam();
+  else if (goalieBlocks()) startSaveCam();
   else startGoalCam();
 }

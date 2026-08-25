@@ -6,8 +6,8 @@
 // ============================================================================
 
 import { AIM, TRACK } from "./balance.js";
-import { BEAT, DYN, FEEL, HEAT, HOOD, SKATERS, TURN } from "./tuning.js";
-import { setHeatLevel, swish, tone } from "./audio.js";
+import { BEAT, DYN, FEEL, HEAT, HOOD, SKATERS, STRAFE, TURN } from "./tuning.js";
+import { setHeatLevel, sfx, swish, tone } from "./audio.js";
 import { pushMix, speedMix, clampTurn } from "./camera.js";
 import { hideGrade } from "./hud.js";
 import { S } from "./state.js";
@@ -16,12 +16,33 @@ import { S } from "./state.js";
 export function spawnSparks(n) {
   for (let i = 0; i < n; i++) {
     S.particles.push({
-      x: (Math.random() - 0.5) * 30,
+      x: (S.puck.x || 0) + (Math.random() - 0.5) * 30,
       z: S.puck.z + TRACK.hitLine + (Math.random() - 0.5) * 20,
       life: 0.2 + Math.random() * 0.3,
       max: 0.45,
     });
   }
+}
+
+/** Веер крошки из-под лезвий: летит против рывка, как настоящий срез льда. */
+export function spawnStrafeSpray(dir) {
+  for (let i = 0; i < STRAFE.sprayN; i++) {
+    S.particles.push({
+      x: (S.puck.x || 0) + dir * (4 + Math.random() * 12),
+      z: S.puck.z + 6 + Math.random() * 26,
+      vx: -dir * (90 + Math.random() * 190),
+      life: 0.22 + Math.random() * 0.26,
+      max: 0.5,
+    });
+  }
+}
+
+/** Рывок вбок: крошка, скрежет коньков и снос корпуса в другую сторону. */
+export function strafeKick(dir) {
+  spawnStrafeSpray(dir);
+  S.braceLean += dir * 16;
+  S.hoodBobVel -= 40;
+  sfx.strafe();
 }
 
 export function updateParticles(dt) {
@@ -31,6 +52,10 @@ export function updateParticles(dt) {
     const p = list[i];
     p.life -= dt;
     p.z -= 40 * dt;
+    if (p.vx) {
+      p.x += p.vx * dt;
+      p.vx *= Math.exp(-4 * dt);
+    }
     if (p.life > 0) list[write++] = p;
   }
   list.length = write;
@@ -67,7 +92,7 @@ export function updateSkaters(dt) {
   }
 }
 
-/** Короткий взгляд в сторону нажатия — только камера, шайба едет прямо. */
+/** Короткий взгляд в сторону нажатия — камера; шайба отдельно делает рывок. */
 export function nudgeLook(code) {
   if (code === "left") {
     S.glanceX = -FEEL.glanceX;
@@ -110,6 +135,10 @@ export function updateFx(dt) {
   S.heat += (S.heatTarget - S.heat) * Math.min(1, dt * 6);
   setHeatLevel(S.heat);
   S.beatPulse = Math.max(0, S.beatPulse - dt * 4);
+
+  // Камера догоняет шайбу с отставанием: на рывке видно, как её сносит вбок.
+  const px = S.puck ? S.puck.x || 0 : 0;
+  S.camX += (px - S.camX) * Math.min(1, STRAFE.camLag * dt);
 
   S.tilt *= 0.88;
   S.turnVel += ((S.turnTarget - S.turn) * TURN.spring - S.turnVel * TURN.damp) * dt;
@@ -175,6 +204,11 @@ export function worldJitter() {
   let jy = S.glanceY;
   let roll = S.tilt + S.glanceRoll;
 
+  // Кадр закладывает вираж по боковой скорости — как на коньках.
+  if (S.puck && S.puck.vx) {
+    roll += -(S.puck.vx / STRAFE.dashVx) * STRAFE.bankRoll;
+  }
+
   // Накал, скорость и сбитый прицел качают кадр только на ходу.
   if (S.phase === "play" && !S.cinema) {
     const sm = speedMix();
@@ -212,6 +246,13 @@ export function hoodJitter() {
   const press = FEEL.glanceX ? S.glanceX / FEEL.glanceX : 0;
   jx += -press * 22;
   roll += -press * HOOD.pressRoll;
+
+  // Отставание камеры = насколько диск уехал из-под глаза. Это и есть скольжение.
+  if (S.puck) {
+    const lag = (S.puck.x || 0) - S.camX;
+    jx += lag * STRAFE.hoodSlide;
+    roll += (lag / STRAFE.maxX) * STRAFE.hoodRoll;
+  }
 
   jy += S.glanceY * 2.6;
   jy += Math.max(-52, Math.min(52, S.camBoost)) * 0.45;

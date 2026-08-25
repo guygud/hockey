@@ -8,7 +8,7 @@
 // первыми) → частицы и штрихи → капот шайбы → виньетка и вспышки → подсказки.
 // ============================================================================
 
-import { SPEED, TRACK } from "./balance.js";
+import { TRACK } from "./balance.js";
 import {
   ARENA,
   BEAT,
@@ -20,6 +20,7 @@ import {
   LENS,
   SPEED_LINES,
   STICK,
+  STRAFE,
 } from "./tuning.js";
 import { imgReady, imgs, konkiSprite } from "./assets.js";
 import { canvas, ctx, hud } from "./dom.js";
@@ -36,7 +37,7 @@ import {
   syncCamera,
 } from "./camera.js";
 import { S, theme } from "./state.js";
-import { timeToHit, timingPhase } from "./rules.js";
+import { strikeProgress, timeToHit, timingPhase } from "./rules.js";
 import { cueCaption, cueKey, cueTarget, cueWord } from "./tutorial.js";
 import { TUTOR } from "./tutorial-script.js";
 import { hoodJitter, worldJitter } from "./fx.js";
@@ -327,16 +328,15 @@ function drawPuckBody() {
 const stickSprite = (foe, side) =>
   side < 0 ? (foe ? imgs.redLeft : imgs.blueLeft) : foe ? imgs.redRight : imgs.blueRight;
 
-/** 0 далеко, 1 в момент контакта — ведёт замах и «нырок» клюшки. */
-function strikeProgress(obs) {
-  const span = Math.max(S.puck.vz, SPEED.min) * 1.35;
-  return clamp01(1 - (obs.z - S.puck.z - TRACK.hitLine) / span);
-}
-
-/** 0 пока не разрешена, потом 1 по мере проезда мимо шайбы. */
+/**
+ * 0 пока не разрешена, потом 1 по мере проезда мимо шайбы. Отсчёт идёт от
+ * МОМЕНТА ОТВЕТА, а не от точки контакта: иначе между «я увернулся» и реакцией
+ * клюшки была мёртвая пауза, пока шайба доезжала до её глубины.
+ */
 function slipProgress(obs) {
   if (!obs.resolved) return 0;
-  return clamp01((S.puck.z + TRACK.hitLine - obs.z) / STICK.slipSpan);
+  const from = obs.slipZ != null ? obs.slipZ : obs.z - TRACK.hitLine;
+  return clamp01((S.puck.z - from) / STICK.slipSpan);
 }
 
 /** Растворяем клюшку на проезде и ещё раз у самого глаза, чтобы не мазала. */
@@ -344,23 +344,34 @@ function passAlpha(slip, d) {
   return Math.pow(Math.max(0, 1 - slip), 0.9) * clamp01((d - CAM.near) / 70);
 }
 
-function stickTipX(side, swing, push, foe) {
+/** Куда наводится боковая красная: её прицел, а не центр коридора. */
+function stickAimX(obs) {
+  if (!obs || obs.side === 0 || typeof obs.aimX !== "number") return 0;
+  return obs.aimX;
+}
+
+/**
+ * Замах отсчитывается ОТ точки наводки: на swing = 1 лезвие приходит ровно в
+ * прицел, а не в центр коридора. Иначе после рывка клюшка уезжала за кадр
+ * вместо того, чтобы тянуться за шайбой.
+ */
+function stickTipX(side, swing, push, foe, obs) {
   if (foe === false) {
     // 0 = за бортом, 1 = лезвие в кадре у шайбы; после толчка push уносит наружу.
     return side * (CORRIDOR.halfW * (1.55 - swing * 0.95) + push * 36);
   }
-  return side * (CORRIDOR.halfW * (1.05 - swing * 1.05 + push));
+  return stickAimX(obs) + side * (CORRIDOR.halfW * (1.05 - swing * 1.05 + push));
 }
 
 /**
  * Спрайты уже развёрнуты по сторонам, лезвие смотрит в коридор. Якорь — на
  * ЛЕЗВИИ, ручка тянется к бортам. Угол берётся только из STICK.
  */
-function drawTiltedStick(img, tipX, tipZ, side, swing, alpha, appearDeg, stopDeg) {
+function drawTiltedStick(img, tipX, tipZ, side, swing, alpha, appearDeg, stopDeg, lenMul = 1) {
   if (!imgReady(img)) return null;
   const tip = projectHeight(tipX, tipZ, STICK.tipHeight);
   if (!tip) return null;
-  const drawW = Math.max(28, Math.min(W * STICK.maxScreenFrac, STICK.worldLen * tip.k));
+  const drawW = Math.max(28, Math.min(W * STICK.maxScreenFrac, STICK.worldLen * lenMul * tip.k));
   const drawH = drawW * (img.naturalHeight / Math.max(1, img.naturalWidth));
   const a = appearDeg * (Math.PI / 180);
   const b = stopDeg * (Math.PI / 180);
@@ -386,21 +397,21 @@ function stickPalette(obs) {
   const hot = obs.windowOpen && !obs.resolved;
   if (obs.foe) {
     return {
-      shaft: hot ? "#ff2e4d" : "#8e1c30",
-      glow: hot ? "rgba(255,60,90,0.5)" : "rgba(220,50,80,0.28)",
+      shaft: hot ? "#c43a52" : "#8e1c30",
+      glow: hot ? "rgba(220,70,90,0.22)" : "rgba(180,50,70,0.14)",
       spark: "255,140,155",
     };
   }
   return {
     shaft: hot ? "#4fc9ff" : "#2a6b8c",
-    glow: hot ? "rgba(90,205,255,0.45)" : "rgba(70,160,210,0.22)",
+    glow: hot ? "rgba(90,205,255,0.28)" : "rgba(70,160,210,0.16)",
     spark: "190,240,255",
   };
 }
 
 /** Ореол на лезвии, чтобы тип клюшки читался ещё до того, как ясен цвет. */
 function drawTipGlow(p, pal, scale) {
-  const r = Math.max(6, 16 * p.k * (scale || 1));
+  const r = Math.max(5, 11 * p.k * (scale || 1));
   const g = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, r);
   g.addColorStop(0, pal.glow);
   g.addColorStop(1, "rgba(0,0,0,0)");
@@ -435,7 +446,8 @@ function drawIceGlow(x, z, obs) {
 
   // Клюшка на act-паузе звучит громче всех; в свободной игре пятно тише.
   const actFocus = !!(S.tutorPause && S.tutorPause.mode === "act" && S.tutorPause.obs === obs);
-  const boost = actFocus ? 2.1 : obs.lesson ? 1.55 : 1.2;
+  const dim = actFocus ? 0.85 : 0.45;
+  const boost = (actFocus ? 1.55 : obs.lesson ? 1.15 : 1) * dim;
   let radiusMul;
   let coreRgb;
   let midRgb;
@@ -448,13 +460,11 @@ function drawIceGlow(x, z, obs) {
     midRgb = obs.foe ? "200,40,70" : "60,150,210";
     alpha = (0.16 + intensity * 0.28) * boost;
   } else if (phase === "perfect") {
-    // Всё идеальное окно держит жёсткую белую вспышку. Без пола яркости кромка
-    // окна начиналась бы с нуля и вспышка пропадала бы за один кадр.
-    const flash = Math.max(0.88, intensity);
+    const flash = Math.max(0.55, intensity);
     radiusMul = 1.35 - flash * 0.15;
     coreRgb = "255,255,255";
-    midRgb = "255,255,255";
-    alpha = (0.72 + flash * 0.28) * (actFocus ? boost : Math.max(boost, 1.65));
+    midRgb = "230,235,245";
+    alpha = (0.38 + flash * 0.16) * (actFocus ? 1.35 : 1);
   } else {
     // Остывающий янтарно-красный — момент упущен.
     radiusMul = 1.3 + (1 - intensity) * 1.1;
@@ -464,7 +474,7 @@ function drawIceGlow(x, z, obs) {
   }
 
   const fade = passAlpha(slipProgress(obs), p.d);
-  const rx = Math.max(10, 28 * p.k * radiusMul * boost);
+  const rx = Math.max(10, 28 * p.k * radiusMul * Math.max(boost, 0.7));
   const ry = Math.max(4, rx * 0.38);
 
   ctx.save();
@@ -479,37 +489,22 @@ function drawIceGlow(x, z, obs) {
   ctx.beginPath();
   ctx.arc(0, 0, rx, 0, Math.PI * 2);
   ctx.fill();
-
-  // Запасное ядро вспышки, если спрайт «сигнала» ещё не загрузился.
-  if (phase === "perfect" && !actFocus && !imgReady(imgs.signal)) {
-    const coreR = rx * 0.42;
-    const core = ctx.createRadialGradient(0, 0, 0, 0, 0, coreR);
-    core.addColorStop(0, "rgba(255,255,255,1)");
-    core.addColorStop(0.45, "rgba(255,255,255,0.75)");
-    core.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.globalAlpha = Math.min(1, 0.95 * fade);
-    ctx.fillStyle = core;
-    ctx.beginPath();
-    ctx.arc(0, 0, coreR, 0, Math.PI * 2);
-    ctx.fill();
-  }
   ctx.restore();
 
-  // Жёлтая звёздочка идеального окна — вне сплющенного эллипса.
+  // Тихий маркер идеального окна — без белого ядра и без пульса.
   if (phase === "perfect" && imgReady(imgs.signal)) {
-    const flash = Math.max(0.88, intensity);
-    const size = Math.max(48, rx * 2.6);
-    const pulse = 0.85 + 0.15 * Math.sin(performance.now() / 90);
+    const flash = Math.max(0.55, intensity);
+    const size = Math.max(28, rx * 1.6);
     ctx.save();
-    ctx.globalAlpha = Math.min(1, (0.78 + flash * 0.22) * fade * pulse * (actFocus ? 1.05 : 1));
+    ctx.globalAlpha = Math.min(1, 0.32 * fade * flash * (actFocus ? 0.7 : 1));
     ctx.drawImage(imgs.signal, p.sx - size / 2, p.sy - size / 2, size, size);
     ctx.restore();
   }
 }
 
 /** Запасная отрисовка древка, если PNG клюшки не загрузился. */
-function drawStickFallback(side, tipZ, tip, pal, swing, alpha, thickness) {
-  const grip = projectHeight(side * CORRIDOR.halfW * 1.45, tipZ, 18);
+function drawStickFallback(side, tipZ, tip, pal, swing, alpha, thickness, originX = 0) {
+  const grip = projectHeight(originX + side * CORRIDOR.halfW * 1.45, tipZ, 18);
   if (!grip) return;
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -533,12 +528,21 @@ function drawStick(obs) {
   const slip = slipProgress(obs);
   const pose = obs.foe ? arrive : slip > 0 ? 1 : slapPose(arrive);
   const side = obs.side;
-  const push = obs.ok ? (obs.foe ? -slip * 1.6 : slip * 1.1) : slip * 0.2;
-  const tipX = stickTipX(side, arrive, push, obs.foe);
+  // Бросок ухода front-loaded: почти весь путь из кадра проходит сразу.
+  const whip = (2 - slip) * slip * STICK.dodgeWhip;
+  const push = obs.ok ? (obs.foe ? whip : slip * 1.1) : slip * 0.2;
+  const tipX = stickTipX(side, arrive, push, obs.foe, obs);
   const tipZ = obs.z + STICK.tipZOffset;
+  const aimX = stickAimX(obs);
+  // Пока прицел не догнал шайбу, клюшка вытягивается — видно, как она тянется.
+  const gap = obs.foe && obs.side !== 0 && !obs.resolved ? Math.abs((S.puck.x || 0) - aimX) : 0;
+  const lenMul = 1 + Math.min(0.22, (gap / STRAFE.maxX) * 0.4);
 
   drawShadow(tipX, tipZ, 12 + pose * 22, 1.1);
-  if (obs.foe) drawIceGlow(tipX * 0.38, tipZ, obs);
+  if (obs.foe) {
+    const glowX = obs.side !== 0 ? aimX : tipX * 0.38;
+    drawIceGlow(glowX, tipZ, obs);
+  }
 
   const tip = projectHeight(tipX, tipZ, STICK.tipHeight);
   if (!tip) return;
@@ -550,12 +554,13 @@ function drawStick(obs) {
 
   ctx.save();
   ctx.globalAlpha = alpha;
-  drawTipGlow(tip, pal, obs.foe ? 1.15 : 0.85);
+  drawTipGlow(tip, pal, obs.foe ? 0.8 : 0.7);
   ctx.restore();
 
-  if (!drawTiltedStick(stickSprite(obs.foe, side), tipX, tipZ, side, pose, alpha, appearDeg, stopDeg)) {
-    drawStickFallback(side, tipZ, tip, pal, pose, alpha, 5 + pose * 3);
-  }
+  const drawn = drawTiltedStick(
+    stickSprite(obs.foe, side), tipX, tipZ, side, pose, alpha, appearDeg, stopDeg, lenMul
+  );
+  if (!drawn) drawStickFallback(side, tipZ, tip, pal, pose, alpha, 5 + pose * 3, aimX);
 
   // Синяя, которая только что подтолкнула, разбрасывает искры.
   if (obs.ok && !obs.foe && slip > 0 && slip < 0.85) {
@@ -581,27 +586,29 @@ function drawCross(obs) {
   const slip = slipProgress(obs);
   const tipZ = obs.z + STICK.tipZOffset;
   const push = obs.ok ? slip * 1.5 : slip * 0.35;
+  // Камера едет с шайбой: ворота прыжка держим в центре кадра, а не у x = 0.
+  const gateX = S.puck.x || 0;
 
-  drawShadow(0, obs.z, 28 + swing * 40, 0.55);
-  drawIceGlow(0, obs.z, obs);
+  drawShadow(gateX, obs.z, 28 + swing * 40, 0.55);
+  drawIceGlow(gateX, obs.z, obs);
 
   const pal = stickPalette(obs);
   for (const side of [-1, 1]) {
-    const tipX = stickTipX(side, swing, push);
+    const tipX = gateX + stickTipX(side, swing, push);
     const tip = projectHeight(tipX, tipZ, STICK.tipHeight);
     if (!tip) continue;
 
     const alpha = passAlpha(slip, tip.d);
     ctx.save();
     ctx.globalAlpha = alpha;
-    drawTipGlow(tip, pal, 1.3);
+    drawTipGlow(tip, pal, 0.9);
     ctx.restore();
 
     const sprite = stickSprite(true, side);
     const drawn = drawTiltedStick(
       sprite, tipX, tipZ, side, swing, alpha, STICK.crossAppearDeg, STICK.crossStopDeg
     );
-    if (!drawn) drawStickFallback(side, tipZ, tip, pal, swing, alpha, 6 + swing * 4);
+    if (!drawn) drawStickFallback(side, tipZ, tip, pal, swing, alpha, 6 + swing * 4, gateX);
   }
 }
 
@@ -921,16 +928,17 @@ function drawTutorCue() {
   }
 
   // Тайминг блика — главный урок, поэтому на паузе он громче бейджа кнопки.
-  let hint = "СМОТРИ НА БЛИК НА ЛЬДУ";
+  const dodge = obs.side !== 0;
+  let hint = dodge ? "СМОТРИ НА БЛИК — УХОДИ" : "СМОТРИ НА БЛИК НА ЛЬДУ";
   let hintRgb = "200,220,240";
   if (tp.phase === "approach") {
-    hint = "БЛИК РАЗГОРАЕТСЯ — ГОТОВЬСЯ";
+    hint = dodge ? "БЛИК РАЗГОРАЕТСЯ — ГОТОВЬСЯ УХОДИТЬ" : "БЛИК РАЗГОРАЕТСЯ — ГОТОВЬСЯ";
     hintRgb = rgb;
   } else if (tp.phase === "perfect" || frozen) {
-    hint = "ЖМИ НА ВСПЫШКЕ";
+    hint = dodge ? "УХОДИ В СТОРОНУ НА БЛИКЕ" : "ПРЫЖОК НА ВСПЫШКЕ";
     hintRgb = "255,255,255";
   } else if (tp.phase === "late") {
-    hint = "ПОЗДНО — БЛИК ОСТЫВАЕТ";
+    hint = dodge ? "ПОЗДНО — КЛЮШКА ДОГОНЯЕТ" : "ПОЗДНО — БЛИК ОСТЫВАЕТ";
     hintRgb = "255,140,90";
   }
   ctx.font = `800 ${(frozen ? 14 : 10.5) * Math.min(baseScale, 1.1)}px ${CUE_FONT}`;

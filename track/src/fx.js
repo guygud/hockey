@@ -6,11 +6,12 @@
 // ============================================================================
 
 import { AIM, STEER } from "./balance.js";
-import { BEAT, DYN, FEEL, HEAT, HOOD, SKATERS, STRAFE, TURN } from "./tuning.js";
+import { BEAT, CUTOUT, DYN, FEEL, GOALIE, HEAT, HOOD, STRAFE, TURN } from "./tuning.js";
 import { setHeatLevel, sfx, swish, tone } from "./audio.js";
 import { pushMix, speedMix, clampTurn } from "./camera.js";
 import { hideGrade } from "./hud.js";
 import { S } from "./state.js";
+import { clamp01 } from "./util.js";
 
 /** Ледяная крошка из-под шайбы в точке контакта. */
 export function spawnSparks(n) {
@@ -61,35 +62,8 @@ export function updateParticles(dt) {
   list.length = write;
 }
 
-function spawnSkater() {
-  if (S.skaters.length >= SKATERS.max || !S.puck) return;
-  let nearCount = 0;
-  for (const s of S.skaters) if (s.near) nearCount += 1;
-  // Держим примерный паритет между ближним и дальним планом.
-  const near = nearCount < S.skaters.length - nearCount;
-  S.skaters.push({
-    x: near ? -46 : -170,
-    zOff: near ? 34 + Math.random() * 36 : 150 + Math.random() * 190,
-    vx: near ? 340 + Math.random() * 90 : 440 + Math.random() * 180,
-    near,
-    stride: Math.random() * Math.PI * 2,
-  });
-}
-
-export function updateSkaters(dt) {
-  if (S.phase === "play") {
-    S.skaterTimer -= dt;
-    if (S.skaterTimer <= 0) {
-      spawnSkater();
-      S.skaterTimer = SKATERS.spawnGap + Math.random() * 1.1;
-    }
-  }
-  for (let i = S.skaters.length - 1; i >= 0; i--) {
-    const s = S.skaters[i];
-    s.x += s.vx * dt;
-    s.stride += dt * 10;
-    if (s.x > (s.near ? 52 : 170)) S.skaters.splice(i, 1);
-  }
+export function updateSkaters() {
+  S.skaters.length = 0;
 }
 
 /** Короткий взгляд в сторону нажатия — камера; шайба отдельно делает рывок. */
@@ -127,6 +101,44 @@ export function tickBeat(dt) {
   }
 }
 
+/** Плавный патруль: штанга → штанга с замедлением у краёв. */
+function updateGoalie(dt) {
+  S.goalieT += dt;
+  const phase = S.goalieT * GOALIE.pace * Math.PI * 2;
+  S.goalieX = Math.sin(phase) * GOALIE.span;
+  const vx = Math.cos(phase);
+  if (Math.abs(vx) > 0.2) S.goalieDir = vx > 0 ? 1 : -1;
+  const z = (S.runDist || 0) - GOALIE.zBack;
+  const gap = S.puck ? z - S.puck.z : GOALIE.nearZ;
+  const want = gap <= 0 ? 1 : Math.pow(clamp01(1 - gap / GOALIE.nearZ), GOALIE.nearPow);
+  const k = 1 - Math.exp(-dt * CUTOUT.turnRate);
+  S.goalieFace += (want - (S.goalieFace || 0)) * k;
+}
+
+/** Красные: тройка ближайших. Союзники: рампа по дистанции, всегда лицом. */
+function updateCutouts(dt) {
+  if (!S.puck || !S.obstacles) return;
+  const ahead = [];
+  for (const o of S.obstacles) {
+    if (o.kind === "boost") continue;
+    if (o.z >= S.puck.z && !o.resolved) ahead.push(o);
+  }
+  ahead.sort((a, b) => a.z - b.z);
+  const facing = new Set(ahead.slice(0, CUTOUT.faceCount));
+  const k = 1 - Math.exp(-dt * CUTOUT.turnRate);
+  for (const o of S.obstacles) {
+    if (o.kind === "boost") {
+      const gap = o.z - S.puck.z;
+      o.face =
+        o.resolved || gap <= 0 ? 1 : Math.pow(clamp01(1 - gap / CUTOUT.allyNearZ), CUTOUT.allyPow);
+      continue;
+    }
+    if (o.face == null) o.face = 0;
+    const target = o.resolved || o.z < S.puck.z || facing.has(o) ? 1 : 0;
+    o.face += (target - o.face) * k;
+  }
+}
+
 /**
  * Все затухания и пружины за один кадр. Порядок не важен: величины независимы.
  * Знак camZ: + = камеру отбросило назад (успех), − = вдавило вперёд (провал).
@@ -160,6 +172,9 @@ export function updateFx(dt) {
 
   S.wobble = Math.max(0, S.wobble - dt * 2.5);
   S.aim = Math.max(0, S.aim - AIM.decay * dt);
+
+  updateGoalie(dt);
+  updateCutouts(dt);
 
   // Пружина прыжка: глаз подлетает над лобовой клюшкой и садится обратно.
   S.camBoostVel += (-S.camBoost * 22 - S.camBoostVel * 5) * dt;

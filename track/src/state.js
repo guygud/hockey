@@ -28,6 +28,7 @@ export const S = {
   obstacles: [],
   particles: [],
   iceMarks: [],
+  cones: [],
   skaters: [],
   skaterTimer: 0,
 
@@ -65,6 +66,13 @@ export const S = {
   beatPulse: 0,
 
   cinema: null,
+  poseMode: false,
+  goalieX: 0,
+  goalieT: 0,
+  goalieTarget: 0,
+  goalieHold: 0,
+  goalieDir: 1,
+  goalieFace: 0,
 
   held: { left: false, right: false, brace: false },
   jumpBuf: 0,

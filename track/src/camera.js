@@ -8,7 +8,7 @@
 // камера едет за шайбой, но с отставанием — иначе рывок вбок не читается.
 // ============================================================================
 
-import { CAM, CAM_OUT, DYN, HOOD, TURN } from "./tuning.js";
+import { CAM, CAM_INTRO, CAM_OUT, DYN, HOOD, TURN } from "./tuning.js";
 import { SPEED } from "./balance.js";
 import { S } from "./state.js";
 import { clamp, clamp01, easeInOut } from "./util.js";
@@ -22,10 +22,11 @@ const rigCache = { back: 0, x: 0, h: 0, focal: CAM.focal, far: CAM.far, yaw: 0, 
 export function syncCamera() {
   const e = easeInOut(S.outside);
   const mix = speedMix();
-  rigCache.back = S.camZ + CAM_OUT.back * e;
-  rigCache.x = S.camX + CAM_OUT.x * e;
+  const out = S.cinema && S.cinema.mode === "intro" ? CAM_INTRO : CAM_OUT;
+  rigCache.back = S.camZ + out.back * e;
+  rigCache.x = S.camX + out.x * e;
   const jumpH = S.puck && S.outside < 0.85 ? S.puck.y || 0 : 0;
-  rigCache.h = CAM.height + (CAM_OUT.height - CAM.height) * e + S.camBoost - DYN.dip * mix * (1 - e) + jumpH;
+  rigCache.h = CAM.height + (out.height - CAM.height) * e + S.camBoost - DYN.dip * mix * (1 - e) + jumpH;
   rigCache.focal = CAM.focal * (1 - DYN.fovPull * mix * (1 - e));
   rigCache.far = Math.max(CAM.far, (S.runDist || 0) + 800);
   const turnMix = S.cinema && S.cinema.mode === "miss" ? 1 : 1 - e;

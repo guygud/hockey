@@ -4,7 +4,8 @@
 // Мир 3D-шный только на бумаге: точка на льду проецируется одним делением на
 // глубину. Никакой матрицы, зато читается за минуту.
 //
-// Доворот (turn) — обман: шайба всегда катится по центру, поворачивается сцена.
+// Доворот (turn) — обман для рыскания прицела. Боковой стрейф настоящий:
+// камера едет за шайбой, но с отставанием — иначе рывок вбок не читается.
 // ============================================================================
 
 import { CAM, CAM_OUT, DYN, HOOD, TURN } from "./tuning.js";
@@ -22,7 +23,7 @@ export function syncCamera() {
   const e = easeInOut(S.outside);
   const mix = speedMix();
   rigCache.back = S.camZ + CAM_OUT.back * e;
-  rigCache.x = CAM_OUT.x * e;
+  rigCache.x = S.camX + CAM_OUT.x * e;
   rigCache.h = CAM.height + (CAM_OUT.height - CAM.height) * e + S.camBoost - DYN.dip * mix * (1 - e);
   rigCache.focal = CAM.focal * (1 - DYN.fovPull * mix * (1 - e));
   rigCache.far = Math.max(CAM.far, (S.runDist || 0) + 800);

@@ -121,7 +121,7 @@ export function resetRun(opts = {}) {
   if (!opts.keepStreak) S.streak = 0;
   if (!opts.keepGoals) S.goals = 0;
 
-  S.puck = { x: 0, z: 40, vz: speedFor(MOMENTUM.start) };
+  S.puck = { x: 0, vx: 0, z: 40, vz: speedFor(MOMENTUM.start) };
   S.obstacles.length = 0;
   S.particles.length = 0;
   S.skaters.length = 0;
@@ -171,6 +171,7 @@ export function resetRun(opts = {}) {
 
 /** Все пружины и вспышки в ноль. */
 function resetFeel() {
+  S.camX = 0;
   S.tilt = 0;
   S.turn = 0;
   S.turnVel = 0;

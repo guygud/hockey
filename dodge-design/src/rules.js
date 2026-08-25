@@ -13,12 +13,13 @@
 //   t < -late          ПРОВАЛ      missCost, прицел сбивается сильнее всего
 //
 // Синие (свои) клюшки в этой схеме не участвуют: они пассивны, проезжают
-// сбоку и сами подталкивают.
+// сбоку и сами подталкивают. Стрейф и охота клюшки — только картинка.
 // ============================================================================
 
 import {
   AIM,
   MOMENTUM,
+  SPEED,
   TRACK,
   drainFor,
   foeChance,
@@ -27,15 +28,16 @@ import {
   streakMult,
   windowsFor,
 } from "./balance.js";
-import { FEEL, HEAT } from "./tuning.js";
+import { FEEL, HEAT, STRAFE } from "./tuning.js";
 import { TUTOR } from "./tutorial-script.js";
 import { S, mods } from "./state.js";
 import { clampTurn, headingAway } from "./camera.js";
 import { sfx } from "./audio.js";
 import { showGrade, updateHud } from "./hud.js";
-import { spawnSparks } from "./fx.js";
+import { spawnSparks, strafeKick } from "./fx.js";
 import { taughtOne } from "./tutorial.js";
 import { startStallCam } from "./flow.js";
+import { clamp01 } from "./util.js";
 
 // ---------------------------------------------------------------------------
 // Скорость и инерция
@@ -60,8 +62,6 @@ function drainRate() {
 // ---------------------------------------------------------------------------
 // Тайминг
 // ---------------------------------------------------------------------------
-
-const clampUnit = (v) => Math.max(0, Math.min(1, v));
 
 /** Секунды до контакта. Отрицательное — момент уже прошёл. */
 export function timeToHit(obs) {
@@ -89,11 +89,11 @@ export function timingPhase(obs) {
   if (t > 0) {
     // От первого появления в кадре до кромки идеального окна.
     const span = Math.max(bounds.open - bounds.perfect, 0.001);
-    return { phase: "approach", t, intensity: clampUnit(1 - (t - bounds.perfect) / span), bounds };
+    return { phase: "approach", t, intensity: clamp01(1 - (t - bounds.perfect) / span), bounds };
   }
   // Момент прошёл, но мы ещё внутри окна «на волосок».
   const span = Math.max(bounds.late - bounds.perfect, 0.001);
-  return { phase: "late", t, intensity: clampUnit(1 - (-t - bounds.perfect) / span), bounds };
+  return { phase: "late", t, intensity: clamp01(1 - (-t - bounds.perfect) / span), bounds };
 }
 
 /** Ближайшая чужая клюшка с открытым окном — та, на которую сейчас отвечаем. */
@@ -109,6 +109,40 @@ function activeWindowObs() {
     }
   }
   return best;
+}
+
+/** 0 далеко, 1 в момент контакта — ведёт замах и догон клюшки. */
+export function strikeProgress(obs) {
+  const span = Math.max(S.puck.vz, SPEED.min) * 1.35;
+  return clamp01(1 - (obs.z - S.puck.z - TRACK.hitLine) / span);
+}
+
+/** Рывок на одно нажатие ←/→. Прыжок боком не двигает. */
+export function dashSide(code) {
+  if (!S.puck) return;
+  const dir = code === "left" ? -1 : code === "right" ? 1 : 0;
+  if (!dir) return;
+  S.puck.vx = dir * STRAFE.dashVx;
+  strafeKick(dir);
+}
+
+/** Инерция рывка + пружина к центру. Оценка нажатия от x не зависит. */
+export function updateStrafe(dt) {
+  if (!S.puck) return;
+  let vx = S.puck.vx || 0;
+  let x = S.puck.x || 0;
+  vx *= Math.exp(-STRAFE.friction * dt);
+  vx += -x * STRAFE.returnK * dt;
+  x += vx * dt;
+  if (x > STRAFE.maxX) {
+    x = STRAFE.maxX;
+    vx = 0;
+  } else if (x < -STRAFE.maxX) {
+    x = -STRAFE.maxX;
+    vx = 0;
+  }
+  S.puck.x = x;
+  S.puck.vx = vx;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,11 +175,17 @@ export function pickFoe(side) {
 // Разрешение клюшки
 // ---------------------------------------------------------------------------
 
+/** Отсюда начинается проезд мимо: и бросок ухода, и растворение клюшки. */
+function markResolved(obs, ok) {
+  obs.resolved = true;
+  obs.ok = ok;
+  obs.slipZ = S.puck.z;
+}
+
 /** Верный ответ: grade = perfect | good | late. */
 function resolveSuccess(obs, grade) {
   if (obs.resolved) return;
-  obs.resolved = true;
-  obs.ok = true;
+  markResolved(obs, true);
 
   const perfect = grade === "perfect";
   const late = grade === "late";
@@ -217,8 +257,7 @@ function resolveSuccess(obs, grade) {
 /** Своя клюшка проезжает мимо: разгон и успокоение, нажимать ничего не надо. */
 function resolveBlueBoost(obs) {
   if (obs.resolved) return;
-  obs.resolved = true;
-  obs.ok = true;
+  markResolved(obs, true);
 
   applyMom(MOMENTUM.gain.blue * streakMult(S.streak));
   showGrade("ПОДТОЛКНУЛО", "grade-good");
@@ -244,8 +283,7 @@ function resolveBlueBoost(obs) {
 /** reason: wrong (не та кнопка) | miss (окно закрылось). */
 function resolveFail(obs, reason) {
   if (obs.resolved) return;
-  obs.resolved = true;
-  obs.ok = false;
+  markResolved(obs, false);
 
   if (!obs.free) applyMom(-MOMENTUM.missCost);
   if (obs.demo) {
@@ -315,10 +353,11 @@ export function handleInputs() {
   const t = timeToHit(obs);
   const b = timingBounds(obs);
 
-  // Верная кнопка, но раньше окна: клюшка живёт дальше, спам стоит инерции.
+  // Верная кнопка, но раньше окна: клюшка живёт дальше и перенаводится.
+  // Ранний уход в сторону скорости не стоит — наказание в том, что она догонит.
   if (pressed === obs.want && t > b.good) {
     showGrade("РАНО", "grade-whiff");
-    if (!S.tutorOn) applyMom(-MOMENTUM.earlyCost);
+    if (!S.tutorOn && obs.side === 0) applyMom(-MOMENTUM.earlyCost);
     updateHud();
     return;
   }
@@ -336,11 +375,18 @@ export function handleInputs() {
   else resolveFail(obs, "miss");
 }
 
-// ---------------------------------------------------------------------------
-// Кадр симуляции
-// ---------------------------------------------------------------------------
+/**
+ * Клюшка тянется за шайбой до самого контакта и замирает ровно в тот момент,
+ * когда игрок ответил. Так картинка не врёт: не ответил — лезвие догоняет и
+ * достаёт, ответил вовремя — бьёт туда, где шайба была.
+ */
+function trackSideStick(obs, dt) {
+  if (obs.answer !== null) return;
+  const px = S.puck.x || 0;
+  obs.aimX += (px - obs.aimX) * Math.min(1, STRAFE.chase * dt);
+}
 
-export function updateObstacles() {
+export function updateObstacles(dt = 1 / 60) {
   for (const obs of S.obstacles) {
     if (obs.resolved) continue;
     const t = timeToHit(obs);
@@ -352,6 +398,9 @@ export function updateObstacles() {
 
     const b = timingBounds(obs);
     if (t < b.open && t > -b.late) obs.windowOpen = true;
+
+    if (obs.side !== 0 && !obs.demo) trackSideStick(obs, dt);
+
     if (obs.windowOpen && obs.answer === null && t < -b.late) resolveFail(obs, "miss");
   }
 
@@ -374,13 +423,13 @@ export function updatePuck(dt) {
     return;
   }
 
-  S.puck.x = 0;
+  updateStrafe(dt);
   S.puck.z += S.puck.vz * dt;
 
   // Редкая крошка из-под шайбы, чтобы движение читалось даже на пустом льду.
   if (Math.random() < dt * 14) {
     S.particles.push({
-      x: (Math.random() - 0.5) * 8,
+      x: (S.puck.x || 0) + (Math.random() - 0.5) * 8,
       z: S.puck.z - 4,
       life: 0.25 + Math.random() * 0.2,
       max: 0.4,
