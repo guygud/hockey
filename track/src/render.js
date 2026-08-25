@@ -65,26 +65,50 @@ function drawArenaStrip() {
   const cover = arenaCover();
   ctx.fillRect(cover.x, 0, cover.w, horizon + 2);
 
-  const boardA = 0.85 + 0.15 * pushMix();
-  if (imgReady(imgs.tribune)) {
-    ctx.save();
-    ctx.globalAlpha = 0.98 * boardA;
-    ctx.drawImage(imgs.tribune, cover.x, 0, cover.w, horizon);
-    ctx.restore();
+  if (!imgReady(imgs.tribune)) return;
+  // Толпа читается только в своих пропорциях: на весь оверскан её растягивать
+  // нельзя, поэтому кладём плитками по ширине.
+  const tileW = horizon * (imgs.tribune.naturalWidth / imgs.tribune.naturalHeight);
+  ctx.save();
+  ctx.globalAlpha = 0.98 * (0.85 + 0.15 * pushMix());
+  for (let x = cover.x; x < cover.x + cover.w; x += tileW) {
+    ctx.drawImage(imgs.tribune, x, 0, tileW, horizon);
   }
-  if (imgReady(imgs.board)) {
-    ctx.save();
-    ctx.globalAlpha = 0.96 * boardA;
-    ctx.drawImage(imgs.board, cover.x, horizon - ARENA.boardH * 0.55, cover.w, ARENA.boardH);
-    ctx.restore();
-  } else if (!imgReady(imgs.tribune)) {
+  ctx.restore();
+}
+
+/** Борт: дуга по центру кадра, дальше по бокам — её краевой столбец. */
+function drawBoards() {
+  const horizon = H * CAM.horizonFrac;
+  const img = imgs.board;
+  const cover = arenaCover();
+  if (!imgReady(img)) {
     ctx.strokeStyle = "rgba(250, 180, 255, 0.35)";
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(0, horizon - 2);
     ctx.lineTo(W, horizon - 2);
     ctx.stroke();
+    return;
   }
+
+  const w = W * ARENA.boardSpan;
+  const h = Math.max(w / ARENA.boardRatio, horizon * ARENA.boardMinFrac);
+  const x = cover.shift + (W - w) / 2;
+  const y = horizon + ARENA.boardDrop - h * ARENA.boardLipFrac;
+  const right = x + w;
+  const edge = cover.x + cover.w;
+
+  ctx.save();
+  ctx.globalAlpha = 0.96 * (0.85 + 0.15 * pushMix());
+  ctx.drawImage(img, x, y, w, h);
+  if (x > cover.x) {
+    ctx.drawImage(img, 0, 0, 1, img.naturalHeight, cover.x, y, x - cover.x, h);
+  }
+  if (right < edge) {
+    ctx.drawImage(img, img.naturalWidth - 1, 0, 1, img.naturalHeight, right, y, edge - right, h);
+  }
+  ctx.restore();
 }
 
 function drawFloor() {
@@ -222,6 +246,10 @@ function drawGoal() {
   const baseR = project(half, z, true);
   if (!postL || !postR || !baseL || !baseR) return;
 
+  const gap = S.puck ? z - S.puck.z : 0;
+  const near = gap <= 0 ? 1 : Math.pow(clamp01(1 - gap / GOAL.nearZ), GOAL.nearPow);
+  if (near < 0.02) return;
+
   const cx = (baseL.sx + baseR.sx) / 2;
   const glowR = Math.max(30, Math.abs(baseR.sx - baseL.sx) * 0.7);
   const goalW = Math.abs(baseR.sx - baseL.sx) * 1.2;
@@ -229,6 +257,8 @@ function drawGoal() {
   const goalY = postL.sy - goalH * 0.08 + goalH * GOAL.yDownFrac;
   const glowY = (postL.sy + baseL.sy) / 2 + goalH * GOAL.yDownFrac * 0.5;
 
+  ctx.save();
+  ctx.globalAlpha = near;
   const glow = ctx.createRadialGradient(cx, glowY, 4, cx, glowY, glowR);
   glow.addColorStop(0, "rgba(255, 140, 255, 0.35)");
   glow.addColorStop(0.55, "rgba(180, 80, 255, 0.14)");
@@ -239,10 +269,9 @@ function drawGoal() {
   ctx.fill();
 
   if (imgReady(imgs.gate)) {
-    ctx.save();
-    ctx.globalAlpha = 0.98;
+    ctx.globalAlpha = near * 0.98;
     ctx.drawImage(imgs.gate, cx - goalW / 2, goalY, goalW, goalH);
-    ctx.restore();
+    ctx.globalAlpha = near;
   } else {
     ctx.strokeStyle = "#e8a0ff";
     ctx.lineWidth = Math.max(3, postL.k * 6);
@@ -253,6 +282,7 @@ function drawGoal() {
     ctx.lineTo(baseR.sx, baseR.sy);
     ctx.stroke();
   }
+  ctx.restore();
 
   if (S.netFlash > 0) {
     const r = glowR * 1.35;
@@ -935,6 +965,7 @@ export function render() {
 
   drawArenaStrip();
   drawFloor();
+  drawBoards();
   drawIceMarks();
   drawLane();
   drawSkaters();
