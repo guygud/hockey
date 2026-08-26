@@ -1,4 +1,7 @@
 // Новый арт-пак. Пути относительно track/index.html.
+// Подними ASSET_VER после замены картинок — браузер не возьмёт старый кэш.
+
+export const ASSET_VER = 3;
 
 const ASSET_SRC = {
   comrade: "../assets/new/comrade.png",
@@ -23,7 +26,7 @@ const ASSET_SRC = {
 export const imgs = {};
 for (const [key, src] of Object.entries(ASSET_SRC)) {
   const img = new Image();
-  img.src = src;
+  img.src = `${src}?v=${ASSET_VER}`;
   imgs[key] = img;
 }
 

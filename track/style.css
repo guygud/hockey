@@ -1,3 +1,5 @@
+/* HUD-картинки: ?v= держи вровень с ASSET_VER в src/assets.js */
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -71,7 +73,7 @@ body {
 }
 
 .hud-stats {
-  background: url("../assets/speed_back.png") center / 100% 100% no-repeat;
+  background: url("../assets/speed_back.png?v=3") center / 100% 100% no-repeat;
   color: #3b1a6e;
   border-radius: 0;
   padding: 10px 22px 10px 18px;
@@ -138,7 +140,7 @@ body.heat-hot .hud-puck-ico {
   gap: 6px;
   min-width: 92px;
   padding: 10px 14px;
-  background: url("../assets/heart-back.png") center / 100% 100% no-repeat;
+  background: url("../assets/heart-back.png?v=3") center / 100% 100% no-repeat;
   border-radius: 0;
   box-shadow: none;
   backdrop-filter: none;
@@ -148,15 +150,15 @@ body.heat-hot .hud-puck-ico {
   width: 18px;
   height: 15px;
   display: inline-block;
-  background: url("../assets/empty-heart.svg") center / contain no-repeat;
+  background: url("../assets/empty-heart.svg?v=3") center / contain no-repeat;
 }
 
 .heart.filled {
-  background-image: url("../assets/full-heart.png");
+  background-image: url("../assets/full-heart.png?v=3");
 }
 
 .heart.empty {
-  background-image: url("../assets/empty-heart.svg");
+  background-image: url("../assets/empty-heart.svg?v=3");
 }
 
 .pause-btn {
@@ -168,7 +170,7 @@ body.heat-hot .hud-puck-ico {
   height: 44px;
   border: none;
   padding: 0;
-  background: url("../assets/pause-button.png") center / contain no-repeat;
+  background: url("../assets/pause-button.png?v=3") center / contain no-repeat;
   background-color: transparent;
   cursor: pointer;
   flex-shrink: 0;
@@ -409,7 +411,7 @@ body.paused .controls-hint {
   border: none;
   border-radius: 0;
   background-color: transparent;
-  background-image: url("../assets/new/arrows.png");
+  background-image: url("../assets/new/arrows.png?v=3");
   background-repeat: no-repeat;
   background-size: 300% 100%;
   color: transparent;
