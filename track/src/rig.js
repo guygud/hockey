@@ -6,7 +6,8 @@
 // ============================================================================
 
 import { SPEED, STEER } from "./balance.js";
-import { CAM, CORRIDOR, LENS, POSE, poseOf } from "./tuning.js";
+import { CAM, CORRIDOR, LENS } from "./tuning.js";
+import { POSE, poseOf } from "./pose.js";
 import { S } from "./state.js";
 import { project, syncCamera } from "./camera.js";
 import { clamp } from "./util.js";

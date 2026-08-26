@@ -24,11 +24,11 @@ import {
   LENS,
   PLAYER,
   PLAYER_EASY,
-  poseOf,
   SKATERS,
   HOOK,
   SPEED_LINES,
 } from "./tuning.js";
+import { poseOf } from "./pose.js";
 import { JUMP, PUCK, TRACK } from "./balance.js";
 import { imgReady, imgs } from "./assets.js";
 import { canvas, ctx, blurCtx } from "./dom.js";

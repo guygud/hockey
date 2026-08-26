@@ -9,7 +9,7 @@ import { LENS } from "./tuning.js";
 import { S } from "./state.js";
 import { canvas, ui } from "./dom.js";
 import { resize, W } from "./viewport.js";
-import { render } from "./render.js";
+import { render } from "./render.js?v=6";
 import { nudgeLook, tickBeat, updateFx, updateParticles, updateSkaters } from "./fx.js";
 import { updateObstacles, updatePuck } from "./drive.js";
 import { updateHud } from "./hud.js";
@@ -198,7 +198,7 @@ if (bootParams.get("pose") || bootParams.get("rig")) {
 }
 if (bootParams.get("rig")) {
   S.rig = { auto: false, hold: false, pending: 0, step: 200, blur: true, vals: {}, autoBtn: null, blurBtn: null, holdBtn: null };
-  import("./rig.js").then((m) => m.initRig());
+  import("./rig.js?v=6").then((m) => m.initRig()).catch((err) => console.error(err));
 }
 resize();
 document.documentElement.style.setProperty("--lens-blur", `${LENS.blur}px`);

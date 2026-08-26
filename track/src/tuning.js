@@ -211,34 +211,7 @@ export const PLAYER = {
   nearFade: 80,
 };
 
-const poseZero = () => ({ x: 0, y: 0, rot: 0, yaw: 0 });
-
-/**
- * Живой сдвиг спрайта (риг). Отдельно тип и сторона.
- * x — вправо по миру, y — вверх, rot — наклон в плоскости кадра вокруг крюка,
- * yaw — поворот вокруг вертикали (градусы, сверху по часовой).
- */
-export const POSE = {
-  enemy: {
-    L: { x: -108, y: -20, rot: -6, yaw: 12 },
-    R: { x: 108, y: -22, rot: 6, yaw: 0 },
-  },
-  pair: {
-    L: { x: 60, y: -20, rot: -16, yaw: 12 },
-    R: { x: -4, y: -22, rot: 16, yaw: 0 },
-  },
-  easy: {
-    L: { x: -44, y: -32, rot: 2, yaw: 12 },
-    R: { x: 16, y: -8, rot: 6, yaw: 0 },
-  },
-  ally: { L: poseZero(), R: poseZero() },
-};
-
-export function poseOf(kind, side) {
-  const pack = POSE[kind];
-  if (!pack) return POSE.enemy.R;
-  return side < 0 ? pack.L : pack.R;
-}
+export { POSE, poseOf } from "./pose.js";
 
 /** Клюшка на влёте. Якорь — крюк; рукоять уходит вправо-вверх. */
 export const HOOK = {
