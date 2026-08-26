@@ -185,7 +185,7 @@ export function updateFx(dt) {
   }
 
   S.hitFlash = Math.max(0, S.hitFlash - dt * 3.2);
-  S.boostFx = Math.max(0, S.boostFx - dt * 1.6);
+  S.boostFx = Math.max(0, S.boostFx - dt * 0.9);
 
   S.camZVel += (-S.camZ * 26 - S.camZVel * 7.5) * dt;
   S.camZ += S.camZVel * dt;

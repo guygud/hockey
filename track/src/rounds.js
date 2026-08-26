@@ -7,8 +7,6 @@
 //   drainMul — расход инерции
 // ============================================================================
 
-import { ICE_MARKS } from "./tuning.js";
-
 const HOOD = ["#5a3a88", "#2a1648"];
 
 /** Нейтральный заезд: обучение и разминка, никаких модификаторов. */
@@ -16,7 +14,6 @@ export const ROUND_NEUTRAL = {
   id: "clean",
   name: "РАЗМИНКА",
   bpm: 0,
-  emojis: ICE_MARKS.emojis,
   theme: {
     shell: "#2a3a58",
     strip: ["#9aa8d4", "#c4cce8", "#dde4f4"],
@@ -33,7 +30,6 @@ export const ROUNDS = [
     id: "night",
     name: "НОЧНАЯ СМЕНА",
     bpm: 118,
-    emojis: ["❄️", "🌙", "🧊", "⭐"],
     theme: {
       shell: "#243050",
       strip: ["#7a8ab8", "#a8b4d8", "#c8d4ec"],
@@ -49,7 +45,6 @@ export const ROUNDS = [
     id: "blitz",
     name: "БЛИЦ",
     bpm: 140,
-    emojis: ["⚡", "🎯", "🏒"],
     theme: {
       shell: "#1e3a40",
       strip: ["#7aa8b0", "#a8d0d4", "#c8e8e8"],
@@ -65,7 +60,6 @@ export const ROUNDS = [
     id: "forge",
     name: "ПЛАВКА",
     bpm: 128,
-    emojis: ["🔥", "🏆", "💥"],
     theme: {
       shell: "#3a2a38",
       strip: ["#c8a8b0", "#e0c8c8", "#f0e0d8"],
@@ -81,7 +75,6 @@ export const ROUNDS = [
     id: "long",
     name: "ДОЛГИЙ ПУТЬ",
     bpm: 112,
-    emojis: ["💎", "👑", "✨"],
     theme: {
       shell: "#2c2848",
       strip: ["#a098c8", "#c8c0e0", "#e0dcf0"],

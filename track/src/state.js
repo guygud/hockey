@@ -27,7 +27,7 @@ export const S = {
   puck: null,
   obstacles: [],
   particles: [],
-  iceMarks: [],
+  scuffs: [],
   cones: [],
   skaters: [],
   skaterTimer: 0,

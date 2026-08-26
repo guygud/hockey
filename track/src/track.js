@@ -17,7 +17,7 @@ import {
   sticksFor,
   tNeeded,
 } from "./balance.js";
-import { CONES, CORRIDOR, ICE_MARKS } from "./tuning.js";
+import { CONES, CORRIDOR, ICE_SCUFF } from "./tuning.js";
 import { hash01, randomSide } from "./util.js";
 
 const MIN_Z_GAP = 160;
@@ -369,21 +369,22 @@ export function seedCones(runDist) {
   return list;
 }
 
-export function seedIceMarks(runDist, emojis) {
-  const marks = [];
-  const pack = emojis || ICE_MARKS.emojis;
-  const startZ = 480;
-  const span = Math.max(240, runDist - 70 - startZ);
-  const count = Math.max(7, Math.round(span / ICE_MARKS.step));
-  const lanes = [0, -0.58, 0.58, -0.92, 0.92];
+const spread = (range, t) => range[0] + (range[1] - range[0]) * t;
+
+/** Пятна затёртого льда. Порядок по возрастанию z — рендер на это опирается. */
+export function seedIceScuffs(runDist) {
+  const list = [];
+  const span = Math.max(ICE_SCUFF.step, runDist + 240 - ICE_SCUFF.startZ);
+  const count = Math.max(6, Math.round(span / ICE_SCUFF.step));
   for (let i = 0; i < count; i++) {
-    const t = (i + 0.45 + hash01(i + 19) * 0.1) / count;
-    marks.push({
-      x: CORRIDOR.halfW * lanes[i % lanes.length] + (hash01(i + 3) - 0.5) * 16,
-      z: startZ + span * t,
-      size: ICE_MARKS.size * (0.9 + hash01(i + 7) * 0.35),
-      emoji: pack[i % pack.length],
+    list.push({
+      x: (hash01(i * 5 + 2) - 0.5) * 2 * ICE_SCUFF.spreadX,
+      z: ICE_SCUFF.startZ + (span * (i + hash01(i * 3 + 9) * 0.85)) / count,
+      w: spread(ICE_SCUFF.width, hash01(i * 7 + 4)),
+      stretch: spread(ICE_SCUFF.stretch, hash01(i * 17 + 8)),
+      mir: hash01(i * 19 + 3) < 0.5 ? -1 : 1,
+      rot: (hash01(i * 11 + 6) - 0.5) * 2 * ICE_SCUFF.rot,
     });
   }
-  return marks;
+  return list;
 }

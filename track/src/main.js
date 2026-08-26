@@ -5,6 +5,7 @@
 // ============================================================================
 
 import { JUMP } from "./balance.js";
+import { LENS } from "./tuning.js";
 import { S } from "./state.js";
 import { canvas, ui } from "./dom.js";
 import { resize, W } from "./viewport.js";
@@ -194,6 +195,7 @@ if (new URLSearchParams(window.location.search).get("pose")) {
   resetGame();
 }
 resize();
+document.documentElement.style.setProperty("--lens-blur", `${LENS.blur}px`);
 requestAnimationFrame((ts) => {
   S.lastTs = ts;
   loop(ts);

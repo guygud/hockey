@@ -4,6 +4,8 @@ const byId = (id) => document.getElementById(id);
 
 export const canvas = byId("game");
 export const ctx = canvas.getContext("2d");
+export const blurCanvas = byId("game-blur");
+export const blurCtx = blurCanvas ? blurCanvas.getContext("2d") : null;
 
 /** Верхний HUD. */
 export const hud = {

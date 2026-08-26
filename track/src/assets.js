@@ -16,6 +16,7 @@ const ASSET_SRC = {
   speed: "../assets/new/speed.png",
   flashs: "../assets/new/flashs.png",
   conus: "../assets/new/conus.png",
+  scuff: "../assets/new/scrabs.png",
   hit: "../assets/hit.png",
 };
 

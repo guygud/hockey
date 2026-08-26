@@ -16,9 +16,11 @@ import {
   CONES,
   CORRIDOR,
   CUTOUT,
+  FLASHES,
   GOAL,
   GOALIE,
   HEAT,
+  ICE_SCUFF,
   LENS,
   PLAYER,
   PLAYER_EASY,
@@ -28,7 +30,7 @@ import {
 } from "./tuning.js";
 import { JUMP } from "./balance.js";
 import { imgReady, imgs } from "./assets.js";
-import { ctx } from "./dom.js";
+import { canvas, ctx, blurCtx } from "./dom.js";
 import {
   arenaCover,
   framePath,
@@ -38,7 +40,6 @@ import {
   projectHeight,
   pushMix,
   rig,
-  speedMix,
   syncCamera,
 } from "./camera.js";
 import { S, theme } from "./state.js";
@@ -73,6 +74,37 @@ function drawArenaStrip() {
   ctx.globalAlpha = 0.98 * (0.85 + 0.15 * pushMix());
   for (let x = cover.x; x < cover.x + cover.w; x += tileW) {
     ctx.drawImage(imgs.tribune, x, 0, tileW, horizon);
+  }
+  ctx.restore();
+}
+
+/** Камеры в толпе: слоты flashs.png вспыхивают над бортом. Чёрный фон гасится сложением. */
+function drawCrowdFlashes() {
+  const img = imgs.flashs;
+  if (!imgReady(img)) return;
+  const horizon = H * CAM.horizonFrac;
+  const slice = img.naturalWidth / 7;
+  const size = Math.max(18, horizon * FLASHES.sizeFrac);
+  const t = performance.now() / 1000;
+  const shift = arenaCover().shift;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < FLASHES.count; i++) {
+    const on = FLASHES.on[0] + hash01(i * 5 + 2) * (FLASHES.on[1] - FLASHES.on[0]);
+    const gap = FLASHES.gap[0] + hash01(i * 7 + 4) * (FLASHES.gap[1] - FLASHES.gap[0]);
+    const period = on + gap;
+    const phase = (t + hash01(i * 11 + 8) * 20) % period;
+    if (phase > on) continue;
+    const a = Math.sin((phase / on) * Math.PI);
+    if (a < 0.04) continue;
+    // По ширине кадра, не по оверскану: cover уезжает далеко влево, и вспышки пропадали.
+    const x = shift + ((i + 0.5) / FLASHES.count) * W + (hash01(i * 13 + 1) - 0.5) * (W / FLASHES.count);
+    const y = horizon * (FLASHES.yMin + hash01(i * 17 + 3) * (FLASHES.yMax - FLASHES.yMin));
+    const slot = i % 7;
+    const s = size * (0.65 + hash01(i * 23 + 9) * 0.7);
+    ctx.globalAlpha = 0.55 + 0.45 * a;
+    ctx.drawImage(img, slot * slice, 0, slice, img.naturalHeight, x - s / 2, y - s / 2, s, s);
   }
   ctx.restore();
 }
@@ -128,56 +160,55 @@ function drawFloor() {
   // Освещение льда — один слой на весь кадр. Сдвиг дал бы шов, поэтому доворот
   // достаётся только воротам, коридору и эмодзи на плоскости.
   if (imgReady(imgs.ice)) ctx.drawImage(imgs.ice, 0, iceY, W, iceH);
-
-  // Полосы от коньков — главный индикатор скорости на пустом льду.
-  const speedBoost = 0.8 + 0.5 * speedMix();
-  const start = Math.floor((S.puck.z - rig().back) / CORRIDOR.ribStep) * CORRIDOR.ribStep;
-  const lineRgb = theme().lines;
-  for (let i = 0; i < 70; i++) {
-    const p = project(0, start + i * CORRIDOR.ribStep, true);
-    if (!p) continue;
-    ctx.strokeStyle = `rgba(${lineRgb},${Math.max(0.03, 0.14 - i * 0.003) * speedBoost})`;
-    ctx.lineWidth = Math.max(1, p.k * 1.2);
-    ctx.beginPath();
-    ctx.moveTo(0, p.sy);
-    ctx.lineTo(W, p.sy);
-    ctx.stroke();
-  }
 }
 
-/** Эмодзи вморожены в лёд: четыре угла на плоскости, едут и крутятся с ареной. */
-function drawIceMarks() {
-  const marks = S.iceMarks;
-  if (marks.length === 0) return;
-  const fontPx = 32;
-  const half = fontPx * 0.5;
-  const cutoff = S.puck.z - 50;
+/**
+ * Пятно затёртого льда — один параллелограмм на плоскости. Три точки дают
+ * базис «вправо» и «вглубь»; без нарезки по полосам нет швов-гармошки.
+ */
+function drawScuff(sc, img) {
+  const iw = img.naturalWidth;
+  const ih = img.naturalHeight;
+  const depth = sc.w * (ih / iw) * sc.stretch;
+  const halfW = sc.w * 0.5;
+  const halfD = depth * 0.5;
+  const cang = Math.cos(sc.rot);
+  const sang = Math.sin(sc.rot);
+
+  const c = project(sc.x, sc.z, true);
+  const r = project(sc.x + cang * halfW * sc.mir, sc.z + sang * halfW * sc.mir, true);
+  const f = project(sc.x - sang * halfD, sc.z + cang * halfD, true);
+  if (!c || !r || !f) return;
+  if (c.d < ICE_SCUFF.nearFade) return;
+  if (sc.z - S.puck.z > ICE_SCUFF.farFade) return;
+
+  const rx = r.sx - c.sx;
+  const ry = r.sy - c.sy;
+  const fx = f.sx - c.sx;
+  const fy = f.sy - c.sy;
+  if (Math.hypot(rx, ry) < 2 && Math.hypot(fx, fy) < 2) return;
 
   ctx.save();
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = `${fontPx}px "Apple Color Emoji","Segoe UI Emoji",sans-serif`;
-  // Метки засеяны по возрастанию z, поэтому идём с конца: дальние рисуются первыми.
-  for (let i = marks.length - 1; i >= 0; i--) {
-    const mark = marks[i];
-    if (mark.z <= cutoff) break;
-    const c = project(mark.x, mark.z, true);
-    const r = project(mark.x + mark.size, mark.z, true);
-    const f = project(mark.x, mark.z + mark.size, true);
-    if (!c || !r || !f) continue;
-    const sx = r.sx - c.sx;
-    const sy = r.sy - c.sy;
-    const fx = f.sx - c.sx;
-    const fy = f.sy - c.sy;
-    if (Math.hypot(sx, sy) < 2 && Math.hypot(fx, fy) < 2) continue;
-    ctx.save();
-    ctx.globalAlpha = 0.38 + clamp01(1 - (mark.z - S.puck.z) / 900) * 0.22;
-    ctx.translate(c.sx, c.sy);
-    ctx.transform(sx / half, sy / half, fx / half, fy / half, 0, 0);
-    ctx.fillText(mark.emoji, 0, 0);
-    ctx.restore();
-  }
+  ctx.translate(c.sx, c.sy);
+  // Исходник: (0,0) — левый-дальний угол; базис x — вправо на iw, y — к камере на ih.
+  ctx.transform(rx / (iw * 0.5), ry / (iw * 0.5), -fx / (ih * 0.5), -fy / (ih * 0.5), 0, 0);
+  ctx.drawImage(img, -iw * 0.5, -ih * 0.5, iw, ih);
   ctx.restore();
+}
+
+/** Затёртый лёд: пятна лежат на плоскости и едут вместе с ареной. */
+function drawIceScuffs() {
+  const img = imgs.scuff;
+  if (!imgReady(img) || S.scuffs.length === 0) return;
+  const cutoff = S.puck.z - 400;
+  const horizon = S.puck.z + ICE_SCUFF.farFade;
+  // Пятна засеяны по возрастанию z, поэтому с конца: дальние ложатся первыми.
+  for (let i = S.scuffs.length - 1; i >= 0; i--) {
+    const sc = S.scuffs[i];
+    if (sc.z > horizon) continue;
+    if (sc.z < cutoff) break;
+    drawScuff(sc, img);
+  }
 }
 
 const byZOffDesc = (a, b) => b.z - a.z;
@@ -208,38 +239,9 @@ function drawSkaters() {
   }
 }
 
-function drawLane() {
-  const nearZ = S.puck.z - rig().back + CAM.near + 2;
-  const farZ = S.puck.z + rig().far * 0.9;
-  const farL = project(-CORRIDOR.halfW, farZ, true);
-  const farR = project(CORRIDOR.halfW, farZ, true);
-  const nearL = project(-CORRIDOR.halfW, nearZ, true);
-  const nearR = project(CORRIDOR.halfW, nearZ, true);
-  if (!farL || !farR || !nearL || !nearR) return;
-
-  const pal = theme();
-  ctx.fillStyle = pal.lane[0];
-  ctx.beginPath();
-  ctx.moveTo(farL.sx, farL.sy);
-  ctx.lineTo(farR.sx, farR.sy);
-  ctx.lineTo(nearR.sx, nearR.sy);
-  ctx.lineTo(nearL.sx, nearL.sy);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.strokeStyle = pal.lane[1];
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.moveTo(farL.sx, farL.sy);
-  ctx.lineTo(nearL.sx, nearL.sy);
-  ctx.moveTo(farR.sx, farR.sy);
-  ctx.lineTo(nearR.sx, nearR.sy);
-  ctx.stroke();
-}
-
 function drawGoal() {
   const z = S.runDist;
-  const half = 100;
+  const half = GOAL.halfW;
   const postL = projectHeight(-half, z, GOAL.postHeight, true);
   const postR = projectHeight(half, z, GOAL.postHeight, true);
   const baseL = project(-half, z, true);
@@ -669,7 +671,7 @@ function drawGoalie() {
   const netZ = S.runDist;
   const z = netZ - GOALIE.zBack;
   const x = S.goalieX || 0;
-  const half = 100;
+  const half = GOAL.halfW;
   const postL = projectHeight(-half, netZ, GOAL.postHeight, true);
   const baseL = project(-half, netZ, true);
   const baseR = project(half, netZ, true);
@@ -766,18 +768,22 @@ function drawSpeedLines() {
   ctx.restore();
 }
 
-/** Радиальные полосы от точки схода — толчок после чистого приёма. */
+/** Радиальные полосы от точки схода — и на ходу, и толчком после чистого приёма. */
 function drawSpeedStreaks() {
-  const a = S.boostFx;
+  if (S.outside > 0.5) return;
+  const drive = clamp01((S.mom - SPEED_LINES.minMom) / (1 - SPEED_LINES.minMom));
+  const t = performance.now() / 1000;
+  const pulse = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(t * SPEED_LINES.imgPulse * Math.PI * 2));
+  const a = Math.min(1, drive * pulse + S.boostFx);
   if (a <= 0.02) return;
   const cx = W / 2;
   const cy = H * CAM.horizonFrac;
   if (imgReady(imgs.speed)) {
-    const w = W * (0.85 + 0.4 * a);
+    const w = W * (0.9 + 0.25 * a);
     const h = w * (imgs.speed.naturalHeight / Math.max(1, imgs.speed.naturalWidth));
     ctx.save();
-    ctx.globalAlpha = 0.28 + 0.55 * a;
-    ctx.drawImage(imgs.speed, cx - w / 2, cy - h * 0.12, w, h);
+    ctx.globalAlpha = 0.22 + 0.55 * a;
+    ctx.drawImage(imgs.speed, cx - w / 2, cy - h * SPEED_LINES.imgY, w, h);
     ctx.restore();
     return;
   }
@@ -939,6 +945,12 @@ function drawTapZones() {
   ctx.restore();
 }
 
+/** Краевой блюр: копия кадра на #game-blur, сам гаусс делает CSS filter. */
+function drawLensBlur() {
+  if (!LENS.blur || !blurCtx) return;
+  blurCtx.drawImage(canvas, 0, 0);
+}
+
 // ---------------------------------------------------------------------------
 // Кадр
 // ---------------------------------------------------------------------------
@@ -965,9 +977,9 @@ export function render() {
 
   drawArenaStrip();
   drawFloor();
+  drawIceScuffs();
   drawBoards();
-  drawIceMarks();
-  drawLane();
+  drawCrowdFlashes();
   drawSkaters();
   drawGoal();
   drawGoalie();
@@ -1003,6 +1015,7 @@ export function render() {
   ctx.restore();
 
   drawFrameTint();
+  drawLensBlur();
   drawHitFlash();
   drawDamageFlash();
   drawPoseCaption();

@@ -21,7 +21,7 @@ import { ensureAudio, sfx } from "./audio.js";
 import { clampTurn } from "./camera.js";
 import { invalidateHud, updateHud } from "./hud.js";
 import { spawnSparks, updateFx, updateParticles } from "./fx.js";
-import { buildCourse, buildPoseCourse, creaseZ, seedCones } from "./track.js";
+import { buildCourse, buildPoseCourse, creaseZ, seedCones, seedIceScuffs } from "./track.js";
 import { speedFor } from "./drive.js";
 import { hideRating, showRating } from "./leaderboard.js";
 import { easeInOut, clamp01 } from "./util.js";
@@ -137,7 +137,7 @@ export function resetRun(opts = {}) {
   S.obstacles = course.obstacles;
   S.particles.length = 0;
   S.skaters.length = 0;
-  S.iceMarks = [];
+  S.scuffs = seedIceScuffs(S.runDist);
   S.cones = seedCones(S.runDist);
   S.skaterTimer = 0;
 
