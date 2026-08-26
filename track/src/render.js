@@ -15,20 +15,20 @@ import {
   CINEMA,
   CONES,
   CORRIDOR,
-  CUTOUT,
   FLASHES,
   GOAL,
   GOALIE,
+  goalieBodyWorld,
   HEAT,
   ICE_SCUFF,
   LENS,
   PLAYER,
   PLAYER_EASY,
   SKATERS,
-  STRIKER,
+  HOOK,
   SPEED_LINES,
 } from "./tuning.js";
-import { JUMP } from "./balance.js";
+import { JUMP, PUCK, TRACK } from "./balance.js";
 import { imgReady, imgs } from "./assets.js";
 import { canvas, ctx, blurCtx } from "./dom.js";
 import {
@@ -220,6 +220,7 @@ function extraProfile() {
     bladeY: PLAYER.bladeY,
     feetX: PLAYER.feetX,
     feetY: PLAYER.feetY,
+    plant: PLAYER.plant,
     maxScreenFrac: SKATERS.maxScreenFrac,
   };
 }
@@ -311,34 +312,27 @@ function drawShadow(x, z, rx, rzScale) {
 function drawStriker() {
   const cin = S.cinema;
   if (!cin || cin.mode !== "intro" || S.outside <= 0.02) return;
-  const img = imgs.comrade;
+  const img = imgs.hook;
   if (!S.puck || !imgReady(img)) return;
   const strike = cin.strike ?? 0;
   const wobble = cin.wobble ?? 0;
-  const yaw0 = ((90 - CINEMA.introOpenDeg) * Math.PI) / 180;
-  const yaw1 = (CINEMA.introBackDeg * Math.PI) / 180;
-  const wobbleRad = (CINEMA.introWobbleDeg * Math.PI) / 180;
-  const yaw = yaw0 + strike * (yaw1 - yaw0) + wobble * wobbleRad;
-  const c = Math.cos(yaw);
-  const mag = Math.max(CUTOUT.minEdge, Math.abs(c));
-  const scale = (c < 0 ? -1 : 1) * mag;
+  const ang =
+    CINEMA.introSwing0 +
+    strike * (CINEMA.introSwing1 - CINEMA.introSwing0) +
+    wobble * ((CINEMA.introWobbleDeg * Math.PI) / 180);
   const px = cin.plantX ?? S.puck.x ?? 0;
   const pz = cin.plantZ ?? S.puck.z;
-  const reach = STRIKER.worldW * (STRIKER.feetX - STRIKER.bladeX);
-  const feetX = px - reach - (1 - strike) * CINEMA.introStandGap;
-  const feet = project(feetX, pz, true);
-  if (!feet) return;
-  const w = Math.max(36, Math.min(W * STRIKER.maxScreenFrac, STRIKER.worldW * feet.k));
+  const z = pz - (1 - strike) * CINEMA.introReach;
+  const blade = project(px, z, true);
+  if (!blade) return;
+  const w = Math.max(80, Math.min(W * HOOK.maxScreenFrac, HOOK.worldW * blade.k));
   const h = w * (img.naturalHeight / Math.max(1, img.naturalWidth));
-  const dx = feet.sx - STRIKER.feetX * w;
-  const dy = feet.sy - STRIKER.feetY * h;
-  drawShadow(feetX, pz, 14 * (0.35 + 0.45 * strike), 1);
+  drawShadow(px, z, 18 * (0.4 + 0.6 * strike), 1);
   ctx.save();
   ctx.globalAlpha = S.outside;
-  ctx.translate(feet.sx, 0);
-  ctx.scale(scale, 1);
-  ctx.translate(-feet.sx, 0);
-  ctx.drawImage(img, dx, dy, w, h);
+  ctx.translate(blade.sx, blade.sy);
+  ctx.rotate(ang);
+  ctx.drawImage(img, -HOOK.bladeX * w, -HOOK.bladeY * h, w, h);
   ctx.restore();
 }
 
@@ -498,60 +492,21 @@ function hookLeftOf(img) {
   return img === imgs.enemy || img === imgs.enemyEasyRight || img === imgs.comrade;
 }
 
-const backPlates = new WeakMap();
-
-function tintedSprite(img, color) {
-  const c = document.createElement("canvas");
-  c.width = img.naturalWidth;
-  c.height = img.naturalHeight;
-  const g = c.getContext("2d");
-  g.drawImage(img, 0, 0);
-  g.globalCompositeOperation = "source-in";
-  g.fillStyle = color;
-  g.fillRect(0, 0, c.width, c.height);
-  return c;
-}
-
-function backPlate(img) {
-  let plate = backPlates.get(img);
-  if (plate) return plate;
-  const fill = tintedSprite(img, CUTOUT.backTint);
-  const edge = tintedSprite(img, CUTOUT.backEdge);
-  plate = document.createElement("canvas");
-  plate.width = img.naturalWidth;
-  plate.height = img.naturalHeight;
-  const g = plate.getContext("2d");
-  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-    g.drawImage(edge, dx, dy);
-  }
-  g.drawImage(fill, 0, 0);
-  backPlates.set(img, plate);
-  return plate;
-}
-
-function drawFigure(img, tipX, tipZ, profile, alpha, face = 1, maxAngle = CUTOUT.maxAngle, hingeHook = false) {
+function drawFigure(img, tipX, tipZ, profile, alpha, face = 1) {
   if (!imgReady(img)) return null;
+  const fade = S.poseMode ? 1 : clamp01(face);
+  if (fade < 0.02) return null;
   const tip = project(tipX, tipZ, true);
   if (!tip) return null;
   const w = Math.max(36, Math.min(W * profile.maxScreenFrac, profile.worldW * tip.k));
   const h = w * (img.naturalHeight / Math.max(1, img.naturalWidth));
   const leftHook = hookLeftOf(img);
   const bx = leftHook ? profile.bladeX : 1 - profile.bladeX;
-  const fx = leftHook ? profile.feetX : 1 - profile.feetX;
   const dx = tip.sx - bx * w;
-  const dy = tip.sy - profile.bladeY * h;
-  const pivot = dx + (hingeHook ? bx : fx) * w;
-  const t = Math.max(0, Math.min(1, face));
-  const c = Math.cos((1 - t) * maxAngle);
-  const mag = Math.max(CUTOUT.minEdge, Math.abs(c));
-  const scale = (c < 0 ? -1 : 1) * mag;
-  const sprite = c <= 0 ? backPlate(img) : img;
+  const dy = tip.sy - profile.bladeY * h + (profile.plant || 0) * h;
   ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.translate(pivot, 0);
-  ctx.scale(scale, 1);
-  ctx.translate(-pivot, 0);
-  ctx.drawImage(sprite, dx, dy, w, h);
+  ctx.globalAlpha = alpha * fade;
+  ctx.drawImage(img, dx, dy, w, h);
   ctx.restore();
   return tip;
 }
@@ -622,13 +577,12 @@ function drawBoost(obs) {
   if (!sample) return;
   const alpha = passAlpha(slip, sample.d) * nearFade(obs);
   const face = obs.face ?? 0;
-  const allyMax = ((90 - CUTOUT.allyOpenDeg) * Math.PI) / 180;
   drawBoostArrows(obs);
   const push = obs.ok ? slip * 36 : 0;
   for (const side of [-1, 1]) {
     const tipX = obs.x + side * CORRIDOR.halfW * PLAYER.allyEdge + side * push;
     drawShadow(tipX, tipZ, 16 * (0.5 + 0.5 * face), 1);
-    drawFigure(comradeImg(side), tipX, tipZ, PLAYER, alpha, face, allyMax, true);
+    drawFigure(comradeImg(side), tipX, tipZ, PLAYER, alpha, face);
   }
 }
 
@@ -655,7 +609,7 @@ function drawPoseCaption() {
   if (!S.poseMode) return;
   ctx.save();
   ctx.font = '600 13px "Segoe UI", system-ui, sans-serif';
-  const text = "POSE  ·  тестовый заезд";
+  const text = "POSE  ·  хитбоксы";
   const tw = ctx.measureText(text).width;
   ctx.fillStyle = "rgba(20, 30, 50, 0.72)";
   ctx.fillRect(12, H - 48, tw + 24, 32);
@@ -664,9 +618,140 @@ function drawPoseCaption() {
   ctx.restore();
 }
 
+function hbPt(x, z, y) {
+  return y > 0.15 ? projectHeight(x, z, y, true) : project(x, z, true);
+}
+
+function hbQuad(x0, z0, x1, z1, y, fill, stroke) {
+  const a = hbPt(x0, z0, y);
+  const b = hbPt(x1, z0, y);
+  const c = hbPt(x1, z1, y);
+  const d = hbPt(x0, z1, y);
+  if (!a || !b || !c || !d) return;
+  ctx.beginPath();
+  ctx.moveTo(a.sx, a.sy);
+  ctx.lineTo(b.sx, b.sy);
+  ctx.lineTo(c.sx, c.sy);
+  ctx.lineTo(d.sx, d.sy);
+  ctx.closePath();
+  if (fill) {
+    ctx.fillStyle = fill;
+    ctx.fill();
+  }
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+}
+
+function hbCircle(x, z, r, y, stroke, fill) {
+  ctx.beginPath();
+  let started = false;
+  for (let i = 0; i <= 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    const p = hbPt(x + Math.cos(a) * r, z + Math.sin(a) * r * 0.35, y);
+    if (!p) continue;
+    if (!started) {
+      ctx.moveTo(p.sx, p.sy);
+      started = true;
+    } else ctx.lineTo(p.sx, p.sy);
+  }
+  if (!started) return;
+  ctx.closePath();
+  if (fill) {
+    ctx.fillStyle = fill;
+    ctx.fill();
+  }
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+function hbBox(x0, x1, z, y0, y1, stroke) {
+  const z0 = z - 8;
+  const z1 = z + 8;
+  hbQuad(x0, z0, x1, z1, y0, null, stroke);
+  if (y1 > y0 + 0.5) {
+    hbQuad(x0, z0, x1, z1, y1, null, stroke);
+    const corners = [
+      [x0, z0],
+      [x1, z0],
+      [x1, z1],
+      [x0, z1],
+    ];
+    ctx.beginPath();
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1.25;
+    for (const [x, zz] of corners) {
+      const lo = hbPt(x, zz, y0);
+      const hi = hbPt(x, zz, y1);
+      if (!lo || !hi) continue;
+      ctx.moveTo(lo.sx, lo.sy);
+      ctx.lineTo(hi.sx, hi.sy);
+    }
+    ctx.stroke();
+  }
+}
+
+/** Объёмы столкновений. Только ?pose=1: иначе закрывают игру. */
+function drawHitboxes() {
+  if (!S.poseMode || !S.puck) return;
+  const r = PUCK.radius;
+  const px = S.puck.x || 0;
+  const pz = S.puck.z;
+  const py = S.puck.y || 0;
+  const noseZ = pz + TRACK.hitLine;
+  const lane = CORRIDOR.halfW * JUMP.laneFrac;
+
+  ctx.save();
+  ctx.setLineDash([]);
+
+  hbQuad(-lane, pz - 40, lane, S.runDist + 40, 0, "rgba(80,255,120,0.08)", "rgba(80,255,120,0.55)");
+
+  for (const obs of S.obstacles) {
+    const x0 = obs.x - obs.w / 2;
+    const x1 = obs.x + obs.w / 2;
+    if (obs.kind === "boost") {
+      hbBox(x0, x1, obs.z, 0, 0, "rgba(80,200,255,0.95)");
+      hbQuad(x0, obs.z - 10, x1, obs.z + 10, 0, "rgba(80,200,255,0.18)", null);
+    } else if (obs.kind === "low") {
+      hbBox(x0, x1, obs.z, 0, JUMP.clear, "rgba(255,170,40,0.95)");
+      hbQuad(x0 - r, obs.z - 10, x1 + r, obs.z + 10, 0, "rgba(255,140,0,0.12)", "rgba(255,200,80,0.7)");
+    } else {
+      hbBox(x0, x1, obs.z, 0, 36, "rgba(255,70,90,0.95)");
+      hbQuad(x0 - r, obs.z - 10, x1 + r, obs.z + 10, 0, "rgba(255,40,70,0.14)", "rgba(255,120,140,0.85)");
+    }
+  }
+
+  const gZ = S.runDist - GOALIE.zBack;
+  const body = goalieBodyWorld(S.goalieX || 0, S.goalieDir);
+  hbBox(body.left, body.right, gZ, 0, 40, "rgba(255,80,255,0.95)");
+  hbQuad(-GOAL.halfW, S.runDist - 6, GOAL.halfW, S.runDist + 6, 0, "rgba(255,230,80,0.12)", "rgba(255,230,80,0.9)");
+
+  hbCircle(px, pz, r, 0, "rgba(40,255,90,0.95)", "rgba(40,255,90,0.2)");
+  if (py > 0.2) hbCircle(px, pz, r, py, "rgba(40,255,90,0.95)", "rgba(40,255,90,0.12)");
+  hbCircle(px, noseZ, r, py, "rgba(80,255,255,0.95)", "rgba(80,255,255,0.22)");
+
+  const n0 = project(px, pz, true);
+  const n1 = project(px, noseZ, true);
+  if (n0 && n1) {
+    ctx.strokeStyle = "rgba(80,255,255,0.7)";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(n0.sx, n0.sy);
+    ctx.lineTo(n1.sx, n1.sy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  ctx.restore();
+}
+
 function drawGoalie() {
   if (!imgReady(imgs.gater)) return;
-  const face = S.goalieFace || 0;
+  const face = S.poseMode ? 1 : S.goalieFace || 0;
   if (face < 0.03) return;
   const netZ = S.runDist;
   const z = netZ - GOALIE.zBack;
@@ -685,19 +770,14 @@ function drawGoalie() {
   const mid = (baseL.sx + baseR.sx) / 2;
   const sx = mid + (x / half) * ((baseR.sx - baseL.sx) / 2);
   const dir = S.goalieDir < 0 ? -1 : 1;
-  const c = Math.cos((1 - face) * CUTOUT.maxAngle);
-  const mag = Math.max(CUTOUT.minEdge, Math.abs(c));
-  const yaw = (c < 0 ? -1 : 1) * mag;
-  const sprite = c <= 0 ? backPlate(imgs.gater) : imgs.gater;
-  const alpha = 0.2 + 0.78 * face;
 
   drawShadow(x, z, 22 * (0.3 + 0.7 * face), 1.15);
   ctx.save();
-  ctx.globalAlpha = alpha;
+  ctx.globalAlpha = face;
   ctx.translate(sx, 0);
-  ctx.scale(dir * yaw, 1);
+  ctx.scale(dir, 1);
   ctx.translate(-sx, 0);
-  ctx.drawImage(sprite, sx - GOALIE.feetX * w, iceY - GOALIE.feetY * h, w, h);
+  ctx.drawImage(imgs.gater, sx - GOALIE.feetX * w, iceY - GOALIE.feetY * h + (GOALIE.plant || 0) * h, w, h);
   ctx.restore();
 }
 
@@ -1000,6 +1080,7 @@ export function render() {
     else drawObstacle(item);
   }
 
+  drawHitboxes();
   drawParticles();
   drawSpeedLines();
   drawSpeedStreaks();

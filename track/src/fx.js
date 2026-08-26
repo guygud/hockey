@@ -111,11 +111,11 @@ function updateGoalie(dt) {
   const z = (S.runDist || 0) - GOALIE.zBack;
   const gap = S.puck ? z - S.puck.z : GOALIE.nearZ;
   const want = gap <= 0 ? 1 : Math.pow(clamp01(1 - gap / GOALIE.nearZ), GOALIE.nearPow);
-  const k = 1 - Math.exp(-dt * CUTOUT.turnRate);
+  const k = 1 - Math.exp(-dt * CUTOUT.fadeRate);
   S.goalieFace += (want - (S.goalieFace || 0)) * k;
 }
 
-/** Красные: тройка ближайших. Союзники: рампа по дистанции, всегда лицом. */
+/** Прозрачность по дистанции: все фигуры анфас, проявляются из воздуха. */
 function updateCutouts(dt) {
   if (!S.puck || !S.obstacles) return;
   const ahead = [];
@@ -124,18 +124,16 @@ function updateCutouts(dt) {
     if (o.z >= S.puck.z && !o.resolved) ahead.push(o);
   }
   ahead.sort((a, b) => a.z - b.z);
-  const facing = new Set(ahead.slice(0, CUTOUT.faceCount));
-  const k = 1 - Math.exp(-dt * CUTOUT.turnRate);
+  const keep = new Set(ahead.slice(0, CUTOUT.alwaysVisible));
+  const k = 1 - Math.exp(-dt * CUTOUT.fadeRate);
   for (const o of S.obstacles) {
-    if (o.kind === "boost") {
-      const gap = o.z - S.puck.z;
-      o.face =
-        o.resolved || gap <= 0 ? 1 : Math.pow(clamp01(1 - gap / CUTOUT.allyNearZ), CUTOUT.allyPow);
-      continue;
-    }
     if (o.face == null) o.face = 0;
-    const target = o.resolved || o.z < S.puck.z || facing.has(o) ? 1 : 0;
-    o.face += (target - o.face) * k;
+    const gap = o.z - S.puck.z;
+    const want =
+      o.resolved || gap <= 0 || keep.has(o)
+        ? 1
+        : Math.pow(clamp01(1 - gap / CUTOUT.appearZ), CUTOUT.appearPow);
+    o.face += (want - o.face) * k;
   }
 }
 
