@@ -95,8 +95,8 @@ export const STEER = {
 /** Прыжок. Полёт ≈ 0.6 с, clear — высота, с которой low уже не бьёт.
  *  laneFrac — доля ширины коридора, где прыжок вообще засчитывается. */
 export const JUMP = {
-  vy: 210,
-  gravity: 700,
+  vy: 420,
+  gravity: 1400,
   clear: 18,
   buffer: 0.14,
   laneFrac: 0.3,
