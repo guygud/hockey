@@ -315,14 +315,29 @@ function jumpPhysics(dt) {
 }
 
 export function updatePuck(dt) {
-  if (S.poseMode) {
+  if (S.poseMode || S.rig) {
     const prevZ = S.puck.z;
     const prevX = S.puck.x || 0;
     const prevY = S.puck.y || 0;
     jumpPhysics(dt);
     steer(dt);
     S.puck.vz = speedFor(Math.max(0.45, S.mom));
-    S.puck.z += S.puck.vz * dt;
+    const rig = S.rig;
+    if (rig && rig.hold) {
+      if (rig.pending) {
+        const max = S.puck.vz * dt * 1.5;
+        const dz = Math.sign(rig.pending) * Math.min(Math.abs(rig.pending), max);
+        S.puck.z += dz;
+        rig.pending -= dz;
+      }
+    } else if (!rig || rig.auto) {
+      S.puck.z += S.puck.vz * dt;
+    } else if (rig.pending) {
+      const max = S.puck.vz * dt * 1.5;
+      const dz = Math.sign(rig.pending) * Math.min(Math.abs(rig.pending), max);
+      S.puck.z += dz;
+      rig.pending -= dz;
+    }
     sweep(prevZ, prevX, prevY, S.puck.z, S.puck.x || 0, S.puck.y || 0);
     return;
   }

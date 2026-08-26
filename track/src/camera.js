@@ -23,7 +23,7 @@ export function syncCamera() {
   const e = easeInOut(S.outside);
   const mix = speedMix();
   const out = S.cinema && S.cinema.mode === "intro" ? CAM_INTRO : CAM_OUT;
-  rigCache.back = S.camZ + out.back * e;
+  rigCache.back = S.camZ + out.back * e + (CAM.back || 0);
   rigCache.x = S.camX + out.x * e;
   const jumpH = S.puck && S.outside < 0.85 ? S.puck.y || 0 : 0;
   rigCache.h = CAM.height + (out.height - CAM.height) * e + S.camBoost - DYN.dip * mix * (1 - e) + jumpH;

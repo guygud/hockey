@@ -67,6 +67,7 @@ export const S = {
 
   cinema: null,
   poseMode: false,
+  rig: null,
   goalieX: 0,
   goalieT: 0,
   goalieTarget: 0,

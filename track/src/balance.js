@@ -30,8 +30,8 @@ export const MOMENTUM = {
 
 /** Скорость шайбы в мировых единицах в секунду. */
 export const SPEED = {
-  min: 273,
-  max: 1110,
+  min: 546,
+  max: 2220,
   kmhScale: 170 / 530,
 };
 
@@ -43,7 +43,7 @@ export const TRACK = {
   /** Клюшка бьёт здесь, впереди шайбы — иначе контакт случается уже под ногами. */
   hitLine: 100,
   /** Пауза перед первой клюшкой, в секундах. */
-  openTime: 1.5,
+  openTime: 1,
   tailTime: 0.11,
 };
 
@@ -57,25 +57,25 @@ export const TRACK = {
  *   jumpRoom — множитель времени полёта для зазора вокруг прыжков
  */
 export const LEVELS = [
-  { sticks: 6, gateWide: 285, gateTight: 250, tightShare: 0.34, room: 1.75, cadence: 1.3, jumpRoom: 2.6 },
-  { sticks: 7, gateWide: 281, gateTight: 232, tightShare: 0.37, room: 1.64, cadence: 1.21, jumpRoom: 2.46 },
-  { sticks: 8, gateWide: 278, gateTight: 214, tightShare: 0.4, room: 1.53, cadence: 1.12, jumpRoom: 2.32 },
-  { sticks: 8, gateWide: 274, gateTight: 196, tightShare: 0.44, room: 1.42, cadence: 1.03, jumpRoom: 2.18 },
-  { sticks: 9, gateWide: 271, gateTight: 179, tightShare: 0.47, room: 1.31, cadence: 0.94, jumpRoom: 2.04 },
-  { sticks: 10, gateWide: 267, gateTight: 161, tightShare: 0.5, room: 1.2, cadence: 0.85, jumpRoom: 1.9 },
-  { sticks: 13, gateWide: 252, gateTight: 149, tightShare: 0.63, room: 1.13, cadence: 0.8, jumpRoom: 1.76 },
-  { sticks: 15, gateWide: 237, gateTight: 136, tightShare: 0.77, room: 1.05, cadence: 0.74, jumpRoom: 1.61 },
-  { sticks: 18, gateWide: 222, gateTight: 124, tightShare: 0.9, room: 0.98, cadence: 0.69, jumpRoom: 1.47 },
+  { sticks: 6, gateWide: 570, gateTight: 500, tightShare: 0.34, room: 1.75, cadence: 0.87, jumpRoom: 2.6 },
+  { sticks: 7, gateWide: 562, gateTight: 464, tightShare: 0.37, room: 1.64, cadence: 0.81, jumpRoom: 2.46 },
+  { sticks: 8, gateWide: 556, gateTight: 428, tightShare: 0.4, room: 1.53, cadence: 0.75, jumpRoom: 2.32 },
+  { sticks: 8, gateWide: 548, gateTight: 392, tightShare: 0.44, room: 1.42, cadence: 0.69, jumpRoom: 2.18 },
+  { sticks: 9, gateWide: 542, gateTight: 358, tightShare: 0.47, room: 1.31, cadence: 0.63, jumpRoom: 2.04 },
+  { sticks: 10, gateWide: 534, gateTight: 322, tightShare: 0.5, room: 1.2, cadence: 0.57, jumpRoom: 1.9 },
+  { sticks: 13, gateWide: 504, gateTight: 298, tightShare: 0.63, room: 1.13, cadence: 0.53, jumpRoom: 1.76 },
+  { sticks: 15, gateWide: 474, gateTight: 272, tightShare: 0.77, room: 1.05, cadence: 0.49, jumpRoom: 1.61 },
+  { sticks: 18, gateWide: 444, gateTight: 248, tightShare: 0.9, room: 0.98, cadence: 0.46, jumpRoom: 1.47 },
 ];
 
 /** Куда упирается бесконечный хвост после последнего уровня. */
 export const LEVEL_FLOOR = {
   sticks: 24,
-  gateWide: 200,
-  gateTight: 112,
+  gateWide: 400,
+  gateTight: 224,
   tightShare: 1,
   room: 0.88,
-  cadence: 0.62,
+  cadence: 0.41,
   jumpRoom: 1.35,
 };
 
@@ -84,12 +84,12 @@ export const LEVEL_FLOOR = {
  * brake — множитель ускорения, когда жмёшь против текущей vx.
  */
 export const STEER = {
-  accel: 1600,
-  maxVx: 380,
+  accel: 3200,
+  maxVx: 760,
   drag: 2.4,
-  brake: 2800,
+  brake: 5600,
   airControl: 0.42,
-  maxX: 184,
+  maxX: 368,
 };
 
 /** Прыжок. Полёт ≈ 0.6 с, clear — высота, с которой low уже не бьёт.

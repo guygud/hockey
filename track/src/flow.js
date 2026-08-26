@@ -96,14 +96,18 @@ function debugStartLevel() {
   }
 }
 
-/** ?pose=1 — стенд позиционирования фигур: один противник, шайба стоит. */
-export function poseQuery() {
+function queryFlag(name) {
   try {
-    const raw = new URLSearchParams(window.location.search).get("pose");
+    const raw = new URLSearchParams(window.location.search).get(name);
     return raw != null && raw !== "" && raw !== "0" && raw !== "false";
   } catch (err) {
     return false;
   }
+}
+
+/** ?pose=1 или ?rig=1 — стенд позиционирования: cinema нет, курс фиксированный. */
+export function poseQuery() {
+  return queryFlag("pose") || queryFlag("rig");
 }
 
 /** keepLives / keepStreak: переживают попытку внутри одного сета из трёх жизней. */
@@ -551,6 +555,7 @@ function goalieBlocks() {
 
 /** На пятаке: мимо ворот, сейв вратаря или гол. */
 export function checkGoalLine() {
+  if (S.rig && !S.rig.auto) return;
   if (S.puck.z < creaseZ(S.runDist)) return;
   if (S.aim >= AIM.miss) startMissCam();
   else if (goalieBlocks()) startSaveCam();

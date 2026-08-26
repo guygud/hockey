@@ -252,17 +252,17 @@ export function makeCtx(level, mods = {}) {
 export function buildPoseCourse() {
   const ctx = makeCtx(0, {});
   const third = (ctx.halfW * 2) / 3;
-  const twoThirds = (ctx.halfW * 2) * (2 / 3) - 28;
-  const gap = ctx.v * 0.85;
-  const afterJump = ctx.v * 1.15;
+  const twoThirds = (ctx.halfW * 2) * (2 / 3) - 56;
+  const gap = ctx.v * 0.57;
+  const afterJump = ctx.v * 0.77;
   const leftEasy = { kind: "block", x: -ctx.halfW + third / 2, w: third, easy: true };
   const rightEasy = { kind: "block", x: ctx.halfW - third / 2, w: third, easy: true };
   const leftHard = { kind: "block", x: -ctx.halfW + twoThirds / 2, w: twoThirds, easy: false };
   const rightHard = { kind: "block", x: ctx.halfW - twoThirds / 2, w: twoThirds, easy: false };
   const jumpPair = { kind: "low", x: 0, w: ctx.halfW * 1.85 };
-  const boostMid = { kind: "boost", x: 0, w: 118 };
+  const boostMid = { kind: "boost", x: 0, w: 236 };
 
-  let z = Math.round(40 + ctx.v * 3.4);
+  let z = Math.round(40 + ctx.v * 2.3);
   const placed = [];
   const put = (spec, dz) => {
     z = Math.round(z + dz);

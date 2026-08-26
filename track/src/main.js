@@ -63,7 +63,8 @@ function update(dt) {
 function loop(ts) {
   const dt = Math.min((ts - S.lastTs) / 1000, 0.05);
   S.lastTs = ts;
-  if (!S.paused) update(dt);
+  const freeze = S.rig && S.rig.hold && !S.rig.pending;
+  if (!S.paused && !freeze) update(dt);
   render();
   requestAnimationFrame(loop);
 }
@@ -188,11 +189,16 @@ onClick(ui.resumeBtn, () => setPaused(false));
 
 window.addEventListener("resize", resize);
 
-if (new URLSearchParams(window.location.search).get("pose")) {
+const bootParams = new URLSearchParams(window.location.search);
+if (bootParams.get("pose") || bootParams.get("rig")) {
   showIntro(false);
   resetRun({});
 } else {
   resetGame();
+}
+if (bootParams.get("rig")) {
+  S.rig = { auto: false, hold: false, pending: 0, step: 200, blur: true, vals: {}, autoBtn: null, blurBtn: null, holdBtn: null };
+  import("./rig.js").then((m) => m.initRig());
 }
 resize();
 document.documentElement.style.setProperty("--lens-blur", `${LENS.blur}px`);

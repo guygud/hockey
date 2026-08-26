@@ -24,6 +24,7 @@ import {
   LENS,
   PLAYER,
   PLAYER_EASY,
+  poseOf,
   SKATERS,
   HOOK,
   SPEED_LINES,
@@ -236,7 +237,7 @@ function drawSkaters() {
     if (!imgReady(img)) continue;
     const face = s.face ?? 0;
     drawShadow(s.x, s.z, 18 * (0.3 + 0.7 * face), 1);
-    drawFigure(img, s.x, s.z, extraProfile(), 0.96, face);
+    drawFigure(img, s.x, s.z, extraProfile(), 0.96, face, poseOf("ally", s.x));
   }
 }
 
@@ -300,12 +301,12 @@ function drawGoal() {
   }
 }
 
-function drawShadow(x, z, rx, rzScale) {
+function drawShadow(x, z, rx, rzScale, dy = 0) {
   const p = project(x, z, true);
   if (!p) return;
   ctx.fillStyle = "rgba(0,0,0,0.22)";
   ctx.beginPath();
-  ctx.ellipse(p.sx, p.sy, Math.max(4, rx * p.k), Math.max(2, rx * 0.35 * p.k * (rzScale || 1)), 0, 0, Math.PI * 2);
+  ctx.ellipse(p.sx, p.sy + dy, Math.max(4, rx * p.k), Math.max(2, rx * 0.35 * p.k * (rzScale || 1)), 0, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -492,21 +493,31 @@ function hookLeftOf(img) {
   return img === imgs.enemy || img === imgs.enemyEasyRight || img === imgs.comrade;
 }
 
-function drawFigure(img, tipX, tipZ, profile, alpha, face = 1) {
+function drawFigure(img, tipX, tipZ, profile, alpha, face = 1, pose = null) {
   if (!imgReady(img)) return null;
   const fade = S.poseMode ? 1 : clamp01(face);
   if (fade < 0.02) return null;
-  const tip = project(tipX, tipZ, true);
+  const leftHook = hookLeftOf(img);
+  const worldX = tipX + (pose?.x || 0);
+  const tip = project(worldX, tipZ, true);
   if (!tip) return null;
   const w = Math.max(36, Math.min(W * profile.maxScreenFrac, profile.worldW * tip.k));
   const h = w * (img.naturalHeight / Math.max(1, img.naturalWidth));
-  const leftHook = hookLeftOf(img);
   const bx = leftHook ? profile.bladeX : 1 - profile.bladeX;
-  const dx = tip.sx - bx * w;
-  const dy = tip.sy - profile.bladeY * h + (profile.plant || 0) * h;
+  const lift = (pose?.y || 0) * tip.k;
+  const rot = ((pose?.rot || 0) * Math.PI) / 180;
+  const yaw = ((pose?.yaw || 0) * Math.PI) / 180;
   ctx.save();
   ctx.globalAlpha = alpha * fade;
-  ctx.drawImage(img, dx, dy, w, h);
+  ctx.translate(tip.sx, tip.sy);
+  if (yaw) {
+    const c = Math.cos(yaw);
+    const s = Math.sin(yaw);
+    const sx = Math.abs(c) < 0.05 ? Math.sign(c || 1) * 0.05 : c;
+    ctx.transform(sx, s * 0.28, 0, 1, 0, 0);
+  }
+  if (rot) ctx.rotate(rot);
+  ctx.drawImage(img, -bx * w, -profile.bladeY * h + (profile.plant || 0) * h - lift, w, h);
   ctx.restore();
   return tip;
 }
@@ -524,7 +535,7 @@ function drawShoulderMate(obs, tipZ, profile, alpha, face) {
   const mz = tipZ + PLAYER.mateAhead;
   const img = side < 0 ? imgs.comradeLeft : imgs.comrade;
   drawShadow(mx, mz, 20 * (0.3 + 0.7 * face), 1);
-  drawFigure(img, mx, mz, profile, alpha * 0.95, face);
+  drawFigure(img, mx, mz, profile, alpha * 0.95, face, poseOf("ally", side));
 }
 
 function drawBlock(obs) {
@@ -539,7 +550,7 @@ function drawBlock(obs) {
   const face = obs.face ?? 0;
   drawIceBand(obs, iceRgb("block"), S.poseMode ? 0.7 : 0.28);
   drawShadow(tipX, tipZ, 22 * (0.3 + 0.7 * face), 1.05);
-  drawFigure(enemyImg(side, obs.easy), tipX, tipZ, profile, alpha, face);
+  drawFigure(enemyImg(side, obs.easy), tipX, tipZ, profile, alpha, face, poseOf(obs.easy ? "easy" : "enemy", side));
   if (obs.mate) drawShoulderMate(obs, tipZ, profile, alpha, face);
 }
 
@@ -566,7 +577,7 @@ function drawLow(obs) {
   const push = obs.ok ? slip * 1.55 : slip * 0.12;
   for (const side of [-1, 1]) {
     const tipX = obs.x + side * (CORRIDOR.halfW * (PLAYER.jumpSpread + push * 0.35));
-    drawFigure(enemyImg(side, false), tipX, tipZ, PLAYER, alpha, face);
+    drawFigure(enemyImg(side, false), tipX, tipZ, PLAYER, alpha, face, poseOf("pair", side));
   }
 }
 
@@ -582,7 +593,7 @@ function drawBoost(obs) {
   for (const side of [-1, 1]) {
     const tipX = obs.x + side * CORRIDOR.halfW * PLAYER.allyEdge + side * push;
     drawShadow(tipX, tipZ, 16 * (0.5 + 0.5 * face), 1);
-    drawFigure(comradeImg(side), tipX, tipZ, PLAYER, alpha, face);
+    drawFigure(comradeImg(side), tipX, tipZ, PLAYER, alpha, face, poseOf("ally", side));
   }
 }
 
@@ -591,11 +602,15 @@ function drawCone(cone) {
   const p = project(cone.x, cone.z, true);
   if (!p) return;
   const w = Math.max(6, Math.min(W * CONES.maxScreenFrac, CONES.worldW * p.k));
-  const h = w * (imgs.conus.naturalHeight / Math.max(1, imgs.conus.naturalWidth));
+  const flat = w * (imgs.conus.naturalHeight / Math.max(1, imgs.conus.naturalWidth));
+  const h = flat * (CONES.heightScale || 1);
   const fade = p.d >= CONES.nearFade ? 1 : 0.12 + 0.88 * clamp01(p.d / CONES.nearFade);
+  // Опускаем по нерастянутой высоте: конус тянется вверх, низ остаётся на месте.
+  const drop = flat * (CONES.plant || 0);
   ctx.save();
   ctx.globalAlpha = fade;
-  ctx.drawImage(imgs.conus, p.sx - w / 2, p.sy - h * 0.96, w, h);
+  drawShadow(cone.x, cone.z, 9, 1, drop);
+  ctx.drawImage(imgs.conus, p.sx - w / 2, p.sy - h * (CONES.feetY || 0.9) + drop, w, h);
   ctx.restore();
 }
 
