@@ -101,13 +101,8 @@ export function tickBeat(dt) {
   }
 }
 
-/** Плавный патруль: штанга → штанга с замедлением у краёв. */
+/** Только проявление с дистанции. Позиция задаётся в resetRun и не едет. */
 function updateGoalie(dt) {
-  S.goalieT += dt;
-  const phase = S.goalieT * GOALIE.pace * Math.PI * 2;
-  S.goalieX = Math.sin(phase) * GOALIE.span;
-  const vx = Math.cos(phase);
-  if (Math.abs(vx) > 0.2) S.goalieDir = vx > 0 ? 1 : -1;
   const z = (S.runDist || 0) - GOALIE.zBack;
   const gap = S.puck ? z - S.puck.z : GOALIE.nearZ;
   const want = gap <= 0 ? 1 : Math.pow(clamp01(1 - gap / GOALIE.nearZ), GOALIE.nearPow);

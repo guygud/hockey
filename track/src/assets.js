@@ -1,7 +1,7 @@
 // Новый арт-пак. Пути относительно track/index.html.
 // Подними ASSET_VER после замены картинок — браузер не возьмёт старый кэш.
 
-export const ASSET_VER = 4;
+export const ASSET_VER = 5;
 
 const ASSET_SRC = {
   comrade: "../assets/new/comrade.png",

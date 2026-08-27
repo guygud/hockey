@@ -13,7 +13,7 @@
 // ============================================================================
 
 import { AIM, MAX_LIVES, MOMENTUM, PUCK, SPEED } from "./balance.js";
-import { CINEMA, FEEL, GOALIE, TURN, goalieBodyWorld } from "./tuning.js";
+import { CINEMA, FEEL, GOALIE, TURN, goalieBodyWorld, rollGoalie } from "./tuning.js";
 import { ROUND_NEUTRAL, ROUNDS } from "./rounds.js";
 import { S, emptyStats, mods } from "./state.js";
 import { ui } from "./dom.js";
@@ -152,6 +152,9 @@ export function resetRun(opts = {}) {
   S.pointers = {};
 
   resetFeel();
+  const g = rollGoalie();
+  S.goalieX = g.x;
+  S.goalieDir = g.dir;
 
   S.runStats = emptyStats();
   S.pendingContinue = null;

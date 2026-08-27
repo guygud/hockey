@@ -200,8 +200,8 @@ export const PLAYER = {
   maxScreenFrac: 2.47,
   /** Доля полуширины коридора от центра до крюка прыжковой пары. */
   jumpSpread: 0.364,
-  /** Союзники: доля полуширины коридора от оси до крюка, ближе к борту. */
-  allyEdge: 0.82,
+  /** Союзники на ускорении: доля полуширины до крюка. >1 — за кромкой коридора. */
+  allyEdge: 1.42,
   /** Напарник за плечом: насколько за бортом и насколько впереди противника. */
   mateOut: 350,
   mateAhead: 220,
@@ -255,8 +255,8 @@ export const GOALIE = {
   zBack: 18,
   span: 184,
   pace: 0.2,
-  /** Сжать спрайт по X. 1 = как в файле. */
-  widthScale: 0.8,
+  /** 1 = пропорции файла. Раньше сжимали до 0.8. */
+  widthScale: 1,
   /** С какой дистанции проявляется прозрачностью. */
   nearZ: 3000,
   nearPow: 0.45,
@@ -271,7 +271,7 @@ export const GOALIE = {
  * дальняя кромка сетки, и на льду створа под ней зияет дыра.
  * nearZ больше вратарского: створ проступает первым, вратарь — уже в нём.
  */
-export const GOAL = { yDownFrac: 0.3, postHeight: 220, halfW: 400, nearZ: 4200, nearPow: 0.7 };
+export const GOAL = { yDownFrac: 0.3, postHeight: 220, halfW: 352, nearZ: 4200, nearPow: 0.7 };
 
 /** Мировые края тела вратаря. dir < 0 — спрайт зеркален вокруг коньков. */
 export function goalieBodyWorld(x = 0, dir = 1) {
@@ -280,6 +280,17 @@ export function goalieBodyWorld(x = 0, dir = 1) {
   const rightOff = (GOALIE.bodyR - GOALIE.feetX) * worldW;
   if (dir < 0) return { left: x - rightOff, right: x - leftOff };
   return { left: x + leftOff, right: x + rightOff };
+}
+
+/** Неподвижная позиция в створе: тело целиком между штангами. */
+export function rollGoalie() {
+  const dir = 1;
+  const origin = goalieBodyWorld(0, dir);
+  const pad = 18;
+  const minX = -GOAL.halfW + pad - origin.left;
+  const maxX = GOAL.halfW - pad - origin.right;
+  const x = minX + Math.random() * Math.max(0, maxX - minX);
+  return { x, dir };
 }
 
 /** Тайминги кинематографичных камер, в секундах. */
