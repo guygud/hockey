@@ -22,7 +22,7 @@ import {
   STICK,
   STRAFE,
 } from "./tuning.js";
-import { imgReady, imgs, konkiSprite } from "./assets.js";
+import { comradeSprite, imgReady, imgs, konkiSprite } from "./assets.js";
 import { canvas, ctx, hud } from "./dom.js";
 import {
   arenaCover,
@@ -174,25 +174,35 @@ function drawIceMarks() {
 const byZOffDesc = (a, b) => b.zOff - a.zOff;
 
 function drawSkaters() {
-  const sprite = konkiSprite();
-  if (!sprite || S.skaters.length === 0) return;
-  const ratio = sprite.height / sprite.width;
+  if (S.skaters.length === 0) return;
+  const nearSprite = konkiSprite();
+  const farSprite = comradeSprite();
+  if (!nearSprite && !farSprite) return;
+
   skaterQueue.length = 0;
   for (const s of S.skaters) skaterQueue.push(s);
   skaterQueue.sort(byZOffDesc);
 
   for (const s of skaterQueue) {
+    const sprite = s.near ? nearSprite : farSprite;
+    if (!sprite) continue;
     const p = project(s.x, S.puck.z + s.zOff, true);
     if (!p) continue;
-    // Ближний план намеренно шире экрана: видно только лезвие, и оно летит.
-    const w = s.near ? W * 1.08 : Math.min(W * 0.34, Math.max(88, 230 * p.k));
+
+    const ratio = sprite.height / Math.max(1, sprite.width);
+    // Ближний план — огромные лезвия; дальний — игрок целиком за бортом.
+    const w = s.near
+      ? W * 1.08
+      : Math.min(W * 0.22, Math.max(56, 140 * p.k));
     if (p.sx + w / 2 < -20 || p.sx - w / 2 > W + 20) continue;
     const h = w * ratio;
+    // Коньки: якорь на лезвии. Игрок: ноги на льду.
+    const blade = s.near ? 0.75 : 0.96;
     const fade = Math.max(0.25, Math.min(1, (p.sx + w / 2) / 80, (W + w / 2 - p.sx) / 80));
     ctx.save();
     ctx.globalAlpha = (s.near ? 0.96 : 0.92) * fade;
     ctx.translate(p.sx, p.sy);
-    ctx.drawImage(sprite, -w / 2, -h * 0.75, w, h);
+    ctx.drawImage(sprite, -w / 2, -h * blade, w, h);
     ctx.restore();
   }
 }

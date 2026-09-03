@@ -15,6 +15,7 @@ const ASSET_SRC = {
   signal: "../assets/signal.svg",
   hit: "../assets/hit.png",
   konki: "../assets/konki.png",
+  comradeSmall: "../assets/new/comrade_small.png",
 };
 
 export const imgs = {};
@@ -28,31 +29,41 @@ export function imgReady(img) {
   return !!(img && img.complete && img.naturalWidth > 0);
 }
 
-let konkiCut = null;
+const cutCache = new Map();
 
 /**
- * Спрайт коньков идёт на чёрном фоне — вырезаем его один раз в offscreen-канву
- * и дальше рисуем уже готовую. При отказе getImageData отдаём исходник.
+ * Спрайты на чёрном фоне — вырезаем один раз в offscreen-канву.
+ * При отказе getImageData отдаём исходник.
  */
-export function konkiSprite() {
-  if (konkiCut) return konkiCut;
-  if (!imgReady(imgs.konki)) return null;
-  const src = imgs.konki;
+function cutBlackBg(key, img) {
+  if (cutCache.has(key)) return cutCache.get(key);
+  if (!imgReady(img)) return null;
   try {
     const c = document.createElement("canvas");
-    c.width = src.naturalWidth;
-    c.height = src.naturalHeight;
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
     const x = c.getContext("2d");
-    x.drawImage(src, 0, 0);
+    x.drawImage(img, 0, 0);
     const data = x.getImageData(0, 0, c.width, c.height);
     const p = data.data;
     for (let i = 0; i < p.length; i += 4) {
       if (p[i] < 22 && p[i + 1] < 22 && p[i + 2] < 22) p[i + 3] = 0;
     }
     x.putImageData(data, 0, 0);
-    konkiCut = c;
+    cutCache.set(key, c);
+    return c;
   } catch (err) {
-    konkiCut = src;
+    cutCache.set(key, img);
+    return img;
   }
-  return konkiCut;
+}
+
+/** Ближний план: только лезвия коньков. */
+export function konkiSprite() {
+  return cutBlackBg("konki", imgs.konki);
+}
+
+/** Дальний план за треком: игрок целиком. */
+export function comradeSprite() {
+  return cutBlackBg("comradeSmall", imgs.comradeSmall);
 }

@@ -13,12 +13,12 @@ const poseZero = () => ({ x: 0, y: 0, rot: 0, yaw: 0 });
  */
 export const POSE = {
   enemy: {
-    L: { x: -108, y: -20, rot: -6, yaw: 12 },
-    R: { x: 108, y: -22, rot: 6, yaw: 0 },
+    L: { x: -148, y: -32, rot: 16, yaw: 0 },
+    R: { x: 148, y: -32, rot: -2, yaw: 0 },
   },
   pair: {
-    L: { x: 60, y: -20, rot: -16, yaw: 12 },
-    R: { x: -4, y: -22, rot: 16, yaw: 0 },
+    L: { x: 72, y: -20, rot: 16, yaw: 0 },
+    R: { x: -72, y: -20, rot: -16, yaw: 0 },
   },
   easy: {
     L: { x: -44, y: -32, rot: 2, yaw: 12 },
