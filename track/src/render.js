@@ -30,7 +30,7 @@ import {
 } from "./tuning.js";
 import { poseOf } from "./pose.js";
 import { JUMP, PUCK, TRACK } from "./balance.js";
-import { imgReady, imgs } from "./assets.js";
+import { comradeSmallSprite, imgReady, imgs } from "./assets.js";
 import { canvas, ctx, blurCtx } from "./dom.js";
 import {
   arenaCover,
@@ -233,11 +233,11 @@ function drawSkaters() {
   skaterQueue.sort(byZOffDesc);
 
   for (const s of skaterQueue) {
-    const img = s.x < 0 ? imgs.comradeLeft : imgs.comrade;
-    if (!imgReady(img)) continue;
+    const img = comradeSmallSprite(s.x);
+    if (!img) continue;
     const face = s.face ?? 0;
     drawShadow(s.x, s.z, 18 * (0.3 + 0.7 * face), 1);
-    drawFigure(img, s.x, s.z, extraProfile(), 0.96, face, poseOf("ally", s.x));
+    drawFigure(img, s.x, s.z, extraProfile(), 0.96, face, poseOf("ally", s.x), s.x >= 0);
   }
 }
 
@@ -485,25 +485,27 @@ function enemyImg(side, easy) {
 }
 
 function comradeImg(side) {
-  return side < 0 ? imgs.comradeLeft : imgs.comrade;
+  return comradeSmallSprite(side);
 }
 
 /** Крюк в левой части кадра спрайта — не путать с суффиксом файла. */
 function hookLeftOf(img) {
-  return img === imgs.enemy || img === imgs.enemyEasyRight || img === imgs.comrade;
+  return img === imgs.enemy || img === imgs.enemyEasyRight || img === imgs.comrade || img === imgs.comradeSmall;
 }
 
-function drawFigure(img, tipX, tipZ, profile, alpha, face = 1, pose = null) {
+function drawFigure(img, tipX, tipZ, profile, alpha, face = 1, pose = null, leftHook = null) {
   if (!imgReady(img)) return null;
   const fade = S.poseMode ? 1 : clamp01(face);
   if (fade < 0.02) return null;
-  const leftHook = hookLeftOf(img);
+  const hookLeft = leftHook == null ? hookLeftOf(img) : leftHook;
   const worldX = tipX + (pose?.x || 0);
   const tip = project(worldX, tipZ, true);
   if (!tip) return null;
+  const nw = img.naturalWidth || img.width;
+  const nh = img.naturalHeight || img.height;
   const w = Math.max(36, Math.min(W * profile.maxScreenFrac, profile.worldW * tip.k));
-  const h = w * (img.naturalHeight / Math.max(1, img.naturalWidth));
-  const bx = leftHook ? profile.bladeX : 1 - profile.bladeX;
+  const h = w * (nh / Math.max(1, nw));
+  const bx = hookLeft ? profile.bladeX : 1 - profile.bladeX;
   const lift = (pose?.y || 0) * tip.k;
   const rot = ((pose?.rot || 0) * Math.PI) / 180;
   const yaw = ((pose?.yaw || 0) * Math.PI) / 180;
@@ -529,13 +531,14 @@ function blockTipX(obs) {
   return innerEdge(obs) + side * (whip + pull);
 }
 
-function drawShoulderMate(obs, tipZ, profile, alpha, face) {
+function drawShoulderMate(obs, tipZ, _profile, alpha, face) {
   const side = obs.x < 0 ? -1 : 1;
   const mx = side * (CORRIDOR.halfW + PLAYER.mateOut);
   const mz = tipZ + PLAYER.mateAhead;
-  const img = side < 0 ? imgs.comradeLeft : imgs.comrade;
+  const img = comradeSmallSprite(side);
+  if (!img) return;
   drawShadow(mx, mz, 20 * (0.3 + 0.7 * face), 1);
-  drawFigure(img, mx, mz, profile, alpha * 0.95, face, poseOf("ally", side));
+  drawFigure(img, mx, mz, extraProfile(), alpha * 0.95, face, poseOf("ally", side), side > 0);
 }
 
 function drawBlock(obs) {
@@ -593,7 +596,7 @@ function drawBoost(obs) {
   for (const side of [-1, 1]) {
     const tipX = obs.x + side * CORRIDOR.halfW * PLAYER.allyEdge + side * push;
     drawShadow(tipX, tipZ, 16 * (0.5 + 0.5 * face), 1);
-    drawFigure(comradeImg(side), tipX, tipZ, PLAYER, alpha, face, poseOf("ally", side));
+    drawFigure(comradeImg(side), tipX, tipZ, extraProfile(), alpha, face, poseOf("ally", side), side > 0);
   }
 }
 

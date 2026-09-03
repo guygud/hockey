@@ -176,15 +176,14 @@ const byZOffDesc = (a, b) => b.zOff - a.zOff;
 function drawSkaters() {
   if (S.skaters.length === 0) return;
   const nearSprite = konkiSprite();
-  const farSprite = comradeSprite();
-  if (!nearSprite && !farSprite) return;
+  if (!nearSprite && !imgs.comradeSmall && !imgs.comradeSmallLeft) return;
 
   skaterQueue.length = 0;
   for (const s of S.skaters) skaterQueue.push(s);
   skaterQueue.sort(byZOffDesc);
 
   for (const s of skaterQueue) {
-    const sprite = s.near ? nearSprite : farSprite;
+    const sprite = s.near ? nearSprite : comradeSprite(s.vx);
     if (!sprite) continue;
     const p = project(s.x, S.puck.z + s.zOff, true);
     if (!p) continue;

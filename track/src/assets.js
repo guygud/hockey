@@ -1,11 +1,13 @@
 // Новый арт-пак. Пути относительно track/index.html.
 // Подними ASSET_VER после замены картинок — браузер не возьмёт старый кэш.
 
-export const ASSET_VER = 6;
+export const ASSET_VER = 7;
 
 const ASSET_SRC = {
   comrade: "../assets/new/comrade.png",
   comradeLeft: "../assets/new/comrade_left.png",
+  comradeSmall: "../assets/new/comrade_small.png",
+  comradeSmallLeft: "../assets/new/comrade_small_left.png",
   enemy: "../assets/new/enemy.png",
   enemyLeft: "../assets/new/enemy_left.png",
   enemyEasyLeft: "../assets/new/enemy_easy_left.png",
@@ -32,5 +34,40 @@ for (const [key, src] of Object.entries(ASSET_SRC)) {
 }
 
 export function imgReady(img) {
-  return !!(img && img.complete && img.naturalWidth > 0);
+  if (!img) return false;
+  if (img.naturalWidth > 0) return true;
+  return !!(img.width && img.height);
+}
+
+const cutCache = new Map();
+
+/** Свои за треком: PNG с чёрным полем, вырезаем один раз. */
+function cutBlackBg(key, img) {
+  if (cutCache.has(key)) return cutCache.get(key);
+  if (!imgReady(img)) return null;
+  try {
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth || img.width;
+    c.height = img.naturalHeight || img.height;
+    const x = c.getContext("2d");
+    x.drawImage(img, 0, 0);
+    const data = x.getImageData(0, 0, c.width, c.height);
+    const p = data.data;
+    for (let i = 0; i < p.length; i += 4) {
+      if (p[i] < 22 && p[i + 1] < 22 && p[i + 2] < 22) p[i + 3] = 0;
+    }
+    x.putImageData(data, 0, 0);
+    cutCache.set(key, c);
+    return c;
+  } catch (err) {
+    cutCache.set(key, img);
+    return img;
+  }
+}
+
+/** Союзник за треком: small справа, small_left слева. */
+export function comradeSmallSprite(side) {
+  return side < 0
+    ? cutBlackBg("comradeSmallLeft", imgs.comradeSmallLeft)
+    : cutBlackBg("comradeSmall", imgs.comradeSmall);
 }

@@ -16,6 +16,7 @@ const ASSET_SRC = {
   hit: "../assets/hit.png",
   konki: "../assets/konki.png",
   comradeSmall: "../assets/new/comrade_small.png",
+  comradeSmallLeft: "../assets/new/comrade_small_left.png",
 };
 
 export const imgs = {};
@@ -63,7 +64,9 @@ export function konkiSprite() {
   return cutBlackBg("konki", imgs.konki);
 }
 
-/** Дальний план за треком: игрок целиком. */
-export function comradeSprite() {
-  return cutBlackBg("comradeSmall", imgs.comradeSmall);
+/** Дальний план за треком: игрок целиком. side < 0 — налево. */
+export function comradeSprite(side = 1) {
+  return side < 0
+    ? cutBlackBg("comradeSmallLeft", imgs.comradeSmallLeft)
+    : cutBlackBg("comradeSmall", imgs.comradeSmall);
 }
